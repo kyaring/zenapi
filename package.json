@@ -1,0 +1,22 @@
+{
+  "name": "new-api-lite",
+  "private": true,
+  "packageManager": "bun@1.3.9",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:worker": "npm --workspace apps/worker run dev",
+    "dev:admin": "npm --workspace apps/admin run dev",
+    "test": "vitest",
+    "fix": "bun pm pkg fix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.4.5",
+    "vitest": "^1.5.3"
+  },
+  "dependencies": {
+    "wrangler": "4"
+  }
+}
