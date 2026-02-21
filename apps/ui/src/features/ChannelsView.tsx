@@ -1,6 +1,115 @@
 import type { Channel, ChannelApiFormat, ChannelForm } from "../core/types";
 import { buildPageItems } from "../core/utils";
 
+type ParsedModel = {
+	id: string;
+	input_price: string;
+	output_price: string;
+};
+
+function parseModelLines(text: string): ParsedModel[] {
+	return text
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.map((line) => {
+			const parts = line.split("|");
+			return {
+				id: parts[0].trim(),
+				input_price: parts[1]?.trim() ?? "",
+				output_price: parts[2]?.trim() ?? "",
+			};
+		});
+}
+
+function rebuildModelsText(models: ParsedModel[]): string {
+	return models
+		.map((m) => {
+			if (m.input_price || m.output_price) {
+				return `${m.id}|${m.input_price}|${m.output_price}`;
+			}
+			return m.id;
+		})
+		.join("\n");
+}
+
+type ModelPricingEditorProps = {
+	models: string;
+	onModelsChange: (value: string) => void;
+};
+
+const ModelPricingEditor = ({
+	models,
+	onModelsChange,
+}: ModelPricingEditorProps) => {
+	const parsed = parseModelLines(models);
+	if (parsed.length === 0) return null;
+
+	const updatePrice = (
+		index: number,
+		field: "input_price" | "output_price",
+		value: string,
+	) => {
+		const updated = [...parsed];
+		updated[index] = { ...updated[index], [field]: value };
+		onModelsChange(rebuildModelsText(updated));
+	};
+
+	return (
+		<div class="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
+			<p class="mb-2 text-xs font-medium uppercase tracking-widest text-stone-400">
+				模型定价（每百万 Token，美元）
+			</p>
+			<div class="space-y-2">
+				{parsed.map((m, i) => (
+					<div
+						key={`${m.id}-${i}`}
+						class="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
+					>
+						<span class="min-w-0 flex-1 truncate text-xs font-medium text-stone-700">
+							{m.id}
+						</span>
+						<div class="flex items-center gap-1.5">
+							<label class="text-xs text-stone-400">输入</label>
+							<input
+								class="w-20 rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-900 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-200"
+								type="number"
+								min="0"
+								step="0.01"
+								placeholder="0"
+								value={m.input_price}
+								onInput={(e) =>
+									updatePrice(
+										i,
+										"input_price",
+										(e.currentTarget as HTMLInputElement).value,
+									)
+								}
+							/>
+							<label class="text-xs text-stone-400">输出</label>
+							<input
+								class="w-20 rounded border border-stone-200 bg-white px-2 py-1 text-xs text-stone-900 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-200"
+								type="number"
+								min="0"
+								step="0.01"
+								placeholder="0"
+								value={m.output_price}
+								onInput={(e) =>
+									updatePrice(
+										i,
+										"output_price",
+										(e.currentTarget as HTMLInputElement).value,
+									)
+								}
+							/>
+						</div>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+};
+
 type ChannelsViewProps = {
 	channelForm: ChannelForm;
 	channelPage: number;
@@ -497,6 +606,12 @@ export const ChannelsView = ({
 								<p class="mt-1 text-xs text-stone-400">
 									每行一个模型 ID，留空则由连通测试自动获取。
 								</p>
+								<ModelPricingEditor
+									models={channelForm.models}
+									onModelsChange={(value) =>
+										onFormChange({ models: value })
+									}
+								/>
 							</div>
 							{channelForm.api_format === "custom" && (
 								<div>

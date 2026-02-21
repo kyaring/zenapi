@@ -8,9 +8,17 @@ type SettingsViewProps = {
 };
 
 const siteModeOptions: { value: SiteMode; label: string; desc: string }[] = [
-	{ value: "personal", label: "自用模式", desc: "不公开模型信息" },
-	{ value: "service", label: "服务模式", desc: "公开模型及价格" },
-	{ value: "shared", label: "共享模式", desc: "公开模型，隐藏价格" },
+	{ value: "personal", label: "自用模式", desc: "个人使用，模型广场不公开" },
+	{
+		value: "service",
+		label: "服务模式",
+		desc: "向用户提供 API 服务，用户有余额，公开模型及价格",
+	},
+	{
+		value: "shared",
+		label: "共享模式",
+		desc: "多人共享渠道资源，共同使用，公开模型广场",
+	},
 ];
 
 export const SettingsView = ({
