@@ -1,12 +1,18 @@
-import { useCallback, useState } from "hono/jsx/dom";
-import { createApiFetch } from "../core/api";
+import { useCallback, useMemo, useState } from "hono/jsx/dom";
 import { apiBase } from "../core/constants";
-import type { MonitoringData } from "../core/types";
+import type { MonitoringChannelData, MonitoringData, MonitoringDailyTrend } from "../core/types";
 
 type MonitoringViewProps = {
 	monitoring: MonitoringData | null;
 	token: string;
 	onLoaded: (data: MonitoringData) => void;
+};
+
+const barColor = (rate: number | null) => {
+	if (rate === null) return "#e7e5e4"; // stone-200, no data
+	if (rate >= 99) return "#22c55e"; // green-500
+	if (rate >= 95) return "#eab308"; // yellow-500
+	return "#ef4444"; // red-500
 };
 
 const rateColor = (rate: number | null) => {
@@ -16,11 +22,118 @@ const rateColor = (rate: number | null) => {
 	return "text-red-600";
 };
 
-const rateBg = (rate: number | null) => {
-	if (rate === null) return "bg-stone-100";
-	if (rate >= 99) return "bg-green-50";
-	if (rate >= 95) return "bg-yellow-50";
-	return "bg-red-50";
+const statusLabel = (rate: number | null) => {
+	if (rate === null) return "无数据";
+	if (rate >= 99) return "正常";
+	if (rate >= 95) return "降级";
+	return "异常";
+};
+
+const statusDot = (rate: number | null) => {
+	if (rate === null) return "bg-stone-300";
+	if (rate >= 99) return "bg-green-500";
+	if (rate >= 95) return "bg-yellow-500";
+	return "bg-red-500";
+};
+
+/** Generate an array of date strings (YYYY-MM-DD) for the last N days, oldest first. */
+const generateDaySlots = (days: number): string[] => {
+	const result: string[] = [];
+	const now = new Date();
+	for (let i = days - 1; i >= 0; i--) {
+		const d = new Date(now.getTime() - i * 86400000);
+		result.push(d.toISOString().slice(0, 10));
+	}
+	return result;
+};
+
+type ChannelBarProps = {
+	channel: MonitoringChannelData;
+	daySlots: string[];
+	trendMap: Map<string, MonitoringDailyTrend>;
+};
+
+const ChannelBar = ({ channel, daySlots, trendMap }: ChannelBarProps) => {
+	const [hoveredDay, setHoveredDay] = useState<string | null>(null);
+
+	const hoveredTrend = hoveredDay ? trendMap.get(`${channel.channel_id}|${hoveredDay}`) : null;
+
+	return (
+		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+			{/* Header row */}
+			<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+				<div class="flex items-center gap-2.5">
+					<span class={`inline-block h-2.5 w-2.5 rounded-full ${statusDot(channel.success_rate)}`} />
+					<span class="font-medium text-stone-900">{channel.channel_name}</span>
+					<span class="rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-500">
+						{channel.api_format}
+					</span>
+					{channel.channel_status !== "active" && (
+						<span class="rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-400">
+							停用
+						</span>
+					)}
+				</div>
+				<div class="flex items-center gap-3 text-xs text-stone-500">
+					<span class={`font-medium ${rateColor(channel.success_rate)}`}>
+						{channel.success_rate !== null ? `${channel.success_rate}%` : "-"}
+					</span>
+					<span>{channel.total_requests > 0 ? `${channel.avg_latency_ms}ms` : "-"}</span>
+					<span class={`font-medium ${rateColor(channel.success_rate)}`}>
+						{statusLabel(channel.success_rate)}
+					</span>
+				</div>
+			</div>
+
+			{/* Uptime bars */}
+			<div class="flex gap-px">
+				{daySlots.map((day) => {
+					const trend = trendMap.get(`${channel.channel_id}|${day}`);
+					const rate = trend ? trend.success_rate : null;
+					return (
+						<div
+							key={day}
+							class="relative flex-1 cursor-pointer"
+							onMouseEnter={() => setHoveredDay(day)}
+							onMouseLeave={() => setHoveredDay(null)}
+						>
+							<div
+								class="h-8 rounded-sm transition-opacity hover:opacity-80"
+								style={{ backgroundColor: barColor(rate) }}
+							/>
+						</div>
+					);
+				})}
+			</div>
+
+			{/* Date labels */}
+			<div class="mt-1 flex justify-between text-xs text-stone-400">
+				<span>{daySlots[0]}</span>
+				<span>{daySlots[daySlots.length - 1]}</span>
+			</div>
+
+			{/* Hover tooltip */}
+			{hoveredDay && (
+				<div class="mt-2 rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-600">
+					<span class="font-medium text-stone-800">{hoveredDay}</span>
+					{hoveredTrend ? (
+						<span>
+							{" "}&mdash; {hoveredTrend.requests} 请求, 成功率{" "}
+							<span class={`font-medium ${rateColor(hoveredTrend.success_rate)}`}>
+								{hoveredTrend.success_rate}%
+							</span>
+							, 延迟 {hoveredTrend.avg_latency_ms}ms
+							{hoveredTrend.errors > 0 && (
+								<span class="text-red-500"> ({hoveredTrend.errors} 错误)</span>
+							)}
+						</span>
+					) : (
+						<span class="text-stone-400"> &mdash; 无请求</span>
+					)}
+				</div>
+			)}
+		</div>
+	);
 };
 
 export const MonitoringView = ({
@@ -39,15 +152,14 @@ export const MonitoringView = ({
 					"Content-Type": "application/json",
 				};
 				if (token) headers.Authorization = `Bearer ${token}`;
-				const res = await fetch(
-					`${apiBase}/api/monitoring?days=${d}`,
-					{ headers },
-				);
+				const res = await fetch(`${apiBase}/api/monitoring?days=${d}`, {
+					headers,
+				});
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				const data = (await res.json()) as MonitoringData;
 				onLoaded(data);
 			} catch {
-				/* silently ignore — parent handles errors */
+				/* silently ignore */
 			} finally {
 				setLoading(false);
 			}
@@ -63,6 +175,17 @@ export const MonitoringView = ({
 		[fetchData],
 	);
 
+	const daySlots = useMemo(() => generateDaySlots(days), [days]);
+
+	const trendMap = useMemo(() => {
+		const map = new Map<string, MonitoringDailyTrend>();
+		if (!monitoring) return map;
+		for (const t of monitoring.dailyTrends) {
+			map.set(`${t.channel_id}|${t.day}`, t);
+		}
+		return map;
+	}, [monitoring]);
+
 	if (!monitoring) {
 		return (
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -71,7 +194,10 @@ export const MonitoringView = ({
 		);
 	}
 
-	const { summary, channels, dailyTrends } = monitoring;
+	const { summary, channels } = monitoring;
+
+	// Overall status
+	const overallStatus = summary.success_rate >= 99 ? "所有系统正常运行" : summary.success_rate >= 95 ? "部分系统降级" : "系统异常";
 
 	return (
 		<div class="space-y-5">
@@ -92,13 +218,28 @@ export const MonitoringView = ({
 						{d === 1 ? "1 天" : d === 7 ? "7 天" : "30 天"}
 					</button>
 				))}
-				{loading && (
-					<span class="text-xs text-stone-400">加载中...</span>
-				)}
+				{loading && <span class="text-xs text-stone-400">加载中...</span>}
+			</div>
+
+			{/* Overall status banner */}
+			<div class={`flex items-center gap-3 rounded-2xl border p-5 shadow-lg ${
+				summary.success_rate >= 99
+					? "border-green-200 bg-green-50"
+					: summary.success_rate >= 95
+						? "border-yellow-200 bg-yellow-50"
+						: "border-red-200 bg-red-50"
+			}`}>
+				<span class={`inline-block h-3 w-3 rounded-full ${statusDot(summary.success_rate)}`} />
+				<span class={`text-lg font-semibold ${rateColor(summary.success_rate)}`}>
+					{overallStatus}
+				</span>
+				<span class="ml-auto text-sm text-stone-500">
+					{summary.total_requests} 请求 &middot; {summary.success_rate}% 成功率 &middot; {summary.avg_latency_ms}ms 延迟
+				</span>
 			</div>
 
 			{/* Global overview cards */}
-			<div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+			<div class="grid grid-cols-1 gap-5 sm:grid-cols-3">
 				<div class="flex flex-col gap-1.5 rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
 					<span class="rounded-full bg-stone-100 px-2.5 py-1 text-xs text-stone-500">
 						整体成功率
@@ -107,7 +248,7 @@ export const MonitoringView = ({
 						{summary.success_rate}%
 					</div>
 					<span class="font-['Space_Grotesk'] text-xs text-stone-500">
-						{summary.total_requests} 次请求
+						成功 {summary.total_success} / 错误 {summary.total_errors}
 					</span>
 				</div>
 				<div class="flex flex-col gap-1.5 rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -115,9 +256,9 @@ export const MonitoringView = ({
 						活跃渠道
 					</span>
 					<div class="text-2xl font-semibold text-stone-900">
-						{summary.active_channels}{" "}
+						{summary.active_channels}
 						<span class="text-base font-normal text-stone-400">
-							/ {summary.total_channels}
+							{" "}/ {summary.total_channels}
 						</span>
 					</div>
 					<span class="font-['Space_Grotesk'] text-xs text-stone-500">
@@ -132,195 +273,36 @@ export const MonitoringView = ({
 						{summary.avg_latency_ms} ms
 					</div>
 					<span class="font-['Space_Grotesk'] text-xs text-stone-500">
-						成功 {summary.total_success} / 错误 {summary.total_errors}
+						{summary.total_requests} 次请求
 					</span>
 				</div>
 			</div>
 
-			{/* Channel status table */}
-			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
-				<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
-					渠道状态
-				</h3>
-				{/* Desktop table */}
-				<div class="hidden md:block">
-					<table class="w-full border-collapse text-sm">
-						<thead>
-							<tr>
-								<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-									渠道
-								</th>
-								<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-									格式
-								</th>
-								<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-									状态
-								</th>
-								<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-									成功率
-								</th>
-								<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-									平均延迟
-								</th>
-								<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-									最近活动
-								</th>
-							</tr>
-						</thead>
-						<tbody>
-							{channels.map((ch) => (
-								<tr class="hover:bg-stone-50" key={ch.channel_id}>
-									<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-										{ch.channel_name}
-									</td>
-									<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-500">
-										{ch.api_format}
-									</td>
-									<td class="border-b border-stone-200 px-3 py-2.5 text-sm">
-										<span
-											class={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-												ch.channel_status === "active"
-													? "bg-green-100 text-green-700"
-													: "bg-stone-100 text-stone-500"
-											}`}
-										>
-											{ch.channel_status === "active" ? "启用" : "停用"}
-										</span>
-									</td>
-									<td
-										class={`border-b border-stone-200 px-3 py-2.5 text-sm font-medium ${rateColor(ch.success_rate)}`}
-									>
-										{ch.success_rate !== null ? `${ch.success_rate}%` : "-"}
-									</td>
-									<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-										{ch.total_requests > 0 ? `${ch.avg_latency_ms} ms` : "-"}
-									</td>
-									<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-500">
-										{ch.last_seen
-											? ch.last_seen.slice(0, 16).replace("T", " ")
-											: "-"}
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
+			{/* Per-channel uptime bars */}
+			{channels.map((ch) => (
+				<ChannelBar
+					key={ch.channel_id}
+					channel={ch}
+					daySlots={daySlots}
+					trendMap={trendMap}
+				/>
+			))}
+
+			{/* Legend */}
+			<div class="flex flex-wrap items-center gap-4 px-1 text-xs text-stone-400">
+				<div class="flex items-center gap-1.5">
+					<span class="inline-block h-3 w-3 rounded-sm bg-green-500" /> 正常 (&ge;99%)
 				</div>
-				{/* Mobile cards */}
-				<div class="space-y-3 md:hidden">
-					{channels.map((ch) => (
-						<div
-							key={ch.channel_id}
-							class={`rounded-xl border border-stone-200 p-4 ${rateBg(ch.success_rate)}`}
-						>
-							<div class="mb-2 flex items-center justify-between">
-								<span class="font-medium text-stone-900">
-									{ch.channel_name}
-								</span>
-								<span
-									class={`rounded-full px-2 py-0.5 text-xs font-medium ${
-										ch.channel_status === "active"
-											? "bg-green-100 text-green-700"
-											: "bg-stone-100 text-stone-500"
-									}`}
-								>
-									{ch.channel_status === "active" ? "启用" : "停用"}
-								</span>
-							</div>
-							<div class="grid grid-cols-3 gap-2 text-xs">
-								<div>
-									<div class="text-stone-400">成功率</div>
-									<div class={`font-medium ${rateColor(ch.success_rate)}`}>
-										{ch.success_rate !== null ? `${ch.success_rate}%` : "-"}
-									</div>
-								</div>
-								<div>
-									<div class="text-stone-400">延迟</div>
-									<div class="text-stone-700">
-										{ch.total_requests > 0 ? `${ch.avg_latency_ms}ms` : "-"}
-									</div>
-								</div>
-								<div>
-									<div class="text-stone-400">格式</div>
-									<div class="text-stone-700">{ch.api_format}</div>
-								</div>
-							</div>
-						</div>
-					))}
+				<div class="flex items-center gap-1.5">
+					<span class="inline-block h-3 w-3 rounded-sm bg-yellow-500" /> 降级 (&ge;95%)
+				</div>
+				<div class="flex items-center gap-1.5">
+					<span class="inline-block h-3 w-3 rounded-sm bg-red-500" /> 异常 (&lt;95%)
+				</div>
+				<div class="flex items-center gap-1.5">
+					<span class="inline-block h-3 w-3 rounded-sm bg-stone-200" /> 无数据
 				</div>
 			</div>
-
-			{/* Daily trends table */}
-			{dailyTrends.length > 0 && (
-				<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
-					<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
-						每日趋势
-					</h3>
-					<div class="overflow-x-auto">
-						<table class="w-full border-collapse text-sm">
-							<thead>
-								<tr>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										日期
-									</th>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										渠道
-									</th>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										请求
-									</th>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										成功
-									</th>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										错误
-									</th>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										成功率
-									</th>
-									<th class="border-b border-stone-200 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
-										延迟
-									</th>
-								</tr>
-							</thead>
-							<tbody>
-								{dailyTrends.map((row) => {
-									const chName =
-										channels.find(
-											(ch) => ch.channel_id === row.channel_id,
-										)?.channel_name ?? row.channel_id ?? "-";
-									return (
-										<tr class="hover:bg-stone-50" key={`${row.day}-${row.channel_id}`}>
-											<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-												{row.day}
-											</td>
-											<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-												{chName}
-											</td>
-											<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-												{row.requests}
-											</td>
-											<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-												{row.success}
-											</td>
-											<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-												{row.errors}
-											</td>
-											<td
-												class={`border-b border-stone-200 px-3 py-2.5 text-sm font-medium ${rateColor(row.success_rate)}`}
-											>
-												{row.success_rate}%
-											</td>
-											<td class="border-b border-stone-200 px-3 py-2.5 text-sm text-stone-700">
-												{row.avg_latency_ms} ms
-											</td>
-										</tr>
-									);
-								})}
-							</tbody>
-						</table>
-					</div>
-				</div>
-			)}
 		</div>
 	);
 };
