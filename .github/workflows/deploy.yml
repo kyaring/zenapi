@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: 📥 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 🔍 检查部署配置
         id: check
@@ -79,14 +81,23 @@ jobs:
           echo "migrations_changed=false" >> $GITHUB_OUTPUT
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" == "0000000000000000000000000000000000000000" ]]; then
               echo "ui_changed=true" >> $GITHUB_OUTPUT
               echo "worker_changed=true" >> $GITHUB_OUTPUT
               echo "migrations_changed=true" >> $GITHUB_OUTPUT
               exit 0
             fi
 
-            CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+            if ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+              echo "⚠️ before 提交不存在，默认视为全量变更"
+              echo "ui_changed=true" >> $GITHUB_OUTPUT
+              echo "worker_changed=true" >> $GITHUB_OUTPUT
+              echo "migrations_changed=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            CHANGED=$(git diff --name-only "$before" "${{ github.sha }}")
 
             if echo "$CHANGED" | grep -q "^apps/ui/"; then
               echo "ui_changed=true" >> $GITHUB_OUTPUT
