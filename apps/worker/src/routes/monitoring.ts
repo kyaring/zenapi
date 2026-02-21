@@ -3,12 +3,22 @@ import type { AppEnv } from "../env";
 
 const monitoring = new Hono<AppEnv>();
 
+const RANGE_CONFIG: Record<string, { ms: number; sqlSlice: number }> = {
+	"15m": { ms: 15 * 60_000, sqlSlice: 16 },
+	"1h": { ms: 60 * 60_000, sqlSlice: 16 },
+	"1d": { ms: 86_400_000, sqlSlice: 10 },
+	"7d": { ms: 7 * 86_400_000, sqlSlice: 10 },
+	"30d": { ms: 30 * 86_400_000, sqlSlice: 10 },
+};
+
 monitoring.get("/", async (c) => {
-	const days = Math.min(Math.max(Number(c.req.query("days")) || 7, 1), 90);
-	const since = new Date(Date.now() - days * 86400000)
+	const range = c.req.query("range") ?? "7d";
+	const config = RANGE_CONFIG[range] ?? RANGE_CONFIG["7d"];
+	const since = new Date(Date.now() - config.ms)
 		.toISOString()
 		.slice(0, 19)
 		.replace("T", " ");
+	const slotExpr = `substr(created_at, 1, ${config.sqlSlice})`;
 
 	const channelRows = await c.env.DB.prepare(
 		`SELECT
@@ -32,7 +42,7 @@ monitoring.get("/", async (c) => {
 	const dailyRows = await c.env.DB.prepare(
 		`SELECT
 			channel_id,
-			substr(created_at, 1, 10) AS day,
+			${slotExpr} AS day,
 			COUNT(*) AS requests,
 			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS success,
 			SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors,
@@ -109,7 +119,7 @@ monitoring.get("/", async (c) => {
 		},
 		channels,
 		dailyTrends,
-		days,
+		range,
 	});
 });
 

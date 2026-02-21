@@ -8,6 +8,15 @@ type MonitoringViewProps = {
 	onLoaded: (data: MonitoringData) => void;
 };
 
+const RANGE_OPTIONS = ["15m", "1h", "1d", "7d", "30d"] as const;
+const RANGE_LABELS: Record<string, string> = {
+	"15m": "15 分钟",
+	"1h": "1 小时",
+	"1d": "1 天",
+	"7d": "7 天",
+	"30d": "30 天",
+};
+
 const barColor = (rate: number | null) => {
 	if (rate === null) return "#e7e5e4"; // stone-200, no data
 	if (rate >= 99) return "#22c55e"; // green-500
@@ -36,27 +45,49 @@ const statusDot = (rate: number | null) => {
 	return "bg-red-500";
 };
 
-/** Generate an array of date strings (YYYY-MM-DD) for the last N days, oldest first. */
-const generateDaySlots = (days: number): string[] => {
+/** Generate time slot strings for a given range. */
+const generateSlots = (range: string): string[] => {
 	const result: string[] = [];
 	const now = new Date();
-	for (let i = days - 1; i >= 0; i--) {
-		const d = new Date(now.getTime() - i * 86400000);
-		result.push(d.toISOString().slice(0, 10));
+	if (range === "15m" || range === "1h") {
+		const minutes = range === "15m" ? 15 : 60;
+		// Round down to current minute
+		now.setSeconds(0, 0);
+		for (let i = minutes - 1; i >= 0; i--) {
+			const d = new Date(now.getTime() - i * 60_000);
+			// YYYY-MM-DD HH:MM — matches SQL substr(created_at, 1, 16)
+			result.push(d.toISOString().slice(0, 16).replace("T", " "));
+		}
+	} else {
+		const days = range === "30d" ? 30 : range === "7d" ? 7 : 1;
+		for (let i = days - 1; i >= 0; i--) {
+			const d = new Date(now.getTime() - i * 86_400_000);
+			result.push(d.toISOString().slice(0, 10));
+		}
 	}
 	return result;
 };
 
+/** Format a slot key for display in labels/tooltips. */
+const formatSlotLabel = (slot: string, range: string): string => {
+	if (range === "15m" || range === "1h") {
+		// "YYYY-MM-DD HH:MM" → show "HH:MM"
+		return slot.slice(11, 16);
+	}
+	return slot;
+};
+
 type ChannelBarProps = {
 	channel: MonitoringChannelData;
-	daySlots: string[];
+	slots: string[];
+	range: string;
 	trendMap: Map<string, MonitoringDailyTrend>;
 };
 
-const ChannelBar = ({ channel, daySlots, trendMap }: ChannelBarProps) => {
-	const [hoveredDay, setHoveredDay] = useState<string | null>(null);
+const ChannelBar = ({ channel, slots, range, trendMap }: ChannelBarProps) => {
+	const [hoveredSlot, setHoveredSlot] = useState<string | null>(null);
 
-	const hoveredTrend = hoveredDay ? trendMap.get(`${channel.channel_id}|${hoveredDay}`) : null;
+	const hoveredTrend = hoveredSlot ? trendMap.get(`${channel.channel_id}|${hoveredSlot}`) : null;
 
 	return (
 		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -87,15 +118,15 @@ const ChannelBar = ({ channel, daySlots, trendMap }: ChannelBarProps) => {
 
 			{/* Uptime bars */}
 			<div class="flex gap-px">
-				{daySlots.map((day) => {
-					const trend = trendMap.get(`${channel.channel_id}|${day}`);
+				{slots.map((slot) => {
+					const trend = trendMap.get(`${channel.channel_id}|${slot}`);
 					const rate = trend ? trend.success_rate : null;
 					return (
 						<div
-							key={day}
+							key={slot}
 							class="relative flex-1 cursor-pointer"
-							onMouseEnter={() => setHoveredDay(day)}
-							onMouseLeave={() => setHoveredDay(null)}
+							onMouseEnter={() => setHoveredSlot(slot)}
+							onMouseLeave={() => setHoveredSlot(null)}
 						>
 							<div
 								class="h-8 rounded-sm transition-opacity hover:opacity-80"
@@ -106,16 +137,16 @@ const ChannelBar = ({ channel, daySlots, trendMap }: ChannelBarProps) => {
 				})}
 			</div>
 
-			{/* Date labels */}
+			{/* Slot labels */}
 			<div class="mt-1 flex justify-between text-xs text-stone-400">
-				<span>{daySlots[0]}</span>
-				<span>{daySlots[daySlots.length - 1]}</span>
+				<span>{formatSlotLabel(slots[0], range)}</span>
+				<span>{formatSlotLabel(slots[slots.length - 1], range)}</span>
 			</div>
 
 			{/* Hover tooltip */}
-			{hoveredDay && (
+			{hoveredSlot && (
 				<div class="mt-2 rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-600">
-					<span class="font-medium text-stone-800">{hoveredDay}</span>
+					<span class="font-medium text-stone-800">{formatSlotLabel(hoveredSlot, range)}</span>
 					{hoveredTrend ? (
 						<span>
 							{" "}&mdash; {hoveredTrend.requests} 请求, 成功率{" "}
@@ -141,18 +172,18 @@ export const MonitoringView = ({
 	token,
 	onLoaded,
 }: MonitoringViewProps) => {
-	const [days, setDays] = useState(7);
+	const [range, setRange] = useState("7d");
 	const [loading, setLoading] = useState(false);
 
 	const fetchData = useCallback(
-		async (d: number) => {
+		async (r: string) => {
 			setLoading(true);
 			try {
 				const headers: Record<string, string> = {
 					"Content-Type": "application/json",
 				};
 				if (token) headers.Authorization = `Bearer ${token}`;
-				const res = await fetch(`${apiBase}/api/monitoring?days=${d}`, {
+				const res = await fetch(`${apiBase}/api/monitoring?range=${r}`, {
 					headers,
 				});
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -167,15 +198,15 @@ export const MonitoringView = ({
 		[token, onLoaded],
 	);
 
-	const handleDaysChange = useCallback(
-		(d: number) => {
-			setDays(d);
-			fetchData(d);
+	const handleRangeChange = useCallback(
+		(r: string) => {
+			setRange(r);
+			fetchData(r);
 		},
 		[fetchData],
 	);
 
-	const daySlots = useMemo(() => generateDaySlots(days), [days]);
+	const slots = useMemo(() => generateSlots(range), [range]);
 
 	const trendMap = useMemo(() => {
 		const map = new Map<string, MonitoringDailyTrend>();
@@ -203,19 +234,19 @@ export const MonitoringView = ({
 		<div class="space-y-5">
 			{/* Time range selector */}
 			<div class="flex items-center gap-2">
-				{[1, 7, 30].map((d) => (
+				{RANGE_OPTIONS.map((r) => (
 					<button
-						key={d}
+						key={r}
 						type="button"
-						onClick={() => handleDaysChange(d)}
+						onClick={() => handleRangeChange(r)}
 						disabled={loading}
 						class={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-							days === d
+							range === r
 								? "bg-stone-900 text-white"
 								: "bg-stone-100 text-stone-600 hover:bg-stone-200"
 						} ${loading ? "opacity-50" : ""}`}
 					>
-						{d === 1 ? "1 天" : d === 7 ? "7 天" : "30 天"}
+						{RANGE_LABELS[r]}
 					</button>
 				))}
 				{loading && <span class="text-xs text-stone-400">加载中...</span>}
@@ -283,7 +314,8 @@ export const MonitoringView = ({
 				<ChannelBar
 					key={ch.channel_id}
 					channel={ch}
-					daySlots={daySlots}
+					slots={slots}
+					range={range}
 					trendMap={trendMap}
 				/>
 			))}

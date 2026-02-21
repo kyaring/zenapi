@@ -89,7 +89,7 @@ export type MonitoringData = {
 	};
 	channels: MonitoringChannelData[];
 	dailyTrends: MonitoringDailyTrend[];
-	days: number;
+	range: string;
 };
 
 export type Settings = {
