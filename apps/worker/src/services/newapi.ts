@@ -1,5 +1,4 @@
 import { safeJsonParse } from "../utils/json";
-import { normalizeBaseUrl } from "../utils/url";
 import {
 	extractModelIds,
 	modelsToJson,
@@ -284,5 +283,5 @@ export function normalizeBaseUrlInput(
 	if (!value) {
 		return null;
 	}
-	return normalizeBaseUrl(String(value));
+	return String(value).trim().replace(/\/+$/, "");
 }

@@ -91,9 +91,9 @@ channels.post("/", async (c) => {
 		id,
 		name: body.name,
 		base_url:
-			apiFormat === "custom"
-				? String(body.base_url)
-				: normalizeBaseUrl(String(body.base_url)),
+			apiFormat === "anthropic"
+				? normalizeBaseUrl(String(body.base_url))
+				: String(body.base_url).trim().replace(/\/+$/, ""),
 		api_key: body.api_key,
 		weight: Number(body.weight ?? 1),
 		status: body.status ?? "active",
@@ -136,9 +136,9 @@ channels.patch("/:id", async (c) => {
 			? body.custom_headers?.trim() || null
 			: (current.custom_headers_json ?? null);
 	const baseUrl =
-		apiFormat === "custom"
-			? String(body.base_url ?? current.base_url)
-			: normalizeBaseUrl(String(body.base_url ?? current.base_url));
+		apiFormat === "anthropic"
+			? normalizeBaseUrl(String(body.base_url ?? current.base_url))
+			: String(body.base_url ?? current.base_url).trim().replace(/\/+$/, "");
 
 	await updateChannel(c.env.DB, id, {
 		name: body.name ?? current.name,

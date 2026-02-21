@@ -38,7 +38,6 @@ import {
 	normalizeStatusFilter,
 } from "../utils/paging";
 import { nowIso } from "../utils/time";
-import { normalizeBaseUrl } from "../utils/url";
 
 const newapi = new Hono<AppEnv>({ strict: false });
 newapi.use("*", newApiAuth);
@@ -277,11 +276,11 @@ newapi.post("/", async (c) => {
 	}
 
 	const now = nowIso();
-	const baseUrl = normalizeBaseUrlInput(parsed.base_url);
+	const baseUrl = normalizeBaseUrlInput(parsed.base_url) ?? String(parsed.base_url).trim().replace(/\/+$/, "");
 	await insertChannel(c.env.DB, {
 		id: existingId,
 		name: parsed.name,
-		base_url: baseUrl ?? normalizeBaseUrl(String(parsed.base_url)),
+		base_url: baseUrl,
 		api_key: parsed.api_key,
 		weight: parsed.weight ?? 1,
 		status: parsed.status ?? "active",

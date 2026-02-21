@@ -112,8 +112,8 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 					}
 				} else if (apiFormat === "openai") {
 					// Convert Anthropic -> OpenAI, send to OpenAI upstream
-					const baseUrl = normalizeBaseUrl(channel.base_url);
-					const target = `${baseUrl}/v1/chat/completions`;
+					const baseUrl = channel.base_url.replace(/\/+$/, "");
+					const target = `${baseUrl}/chat/completions`;
 					const headers = new Headers();
 					headers.set("Authorization", `Bearer ${channel.api_key}`);
 					headers.set("content-type", "application/json");

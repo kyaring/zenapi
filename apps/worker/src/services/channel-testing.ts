@@ -33,7 +33,11 @@ export async function fetchChannelModels(
 
 	if (format === "custom") {
 		target = baseUrl;
+	} else if (format === "openai") {
+		// openai format: base_url already includes version path (e.g. /v1)
+		target = `${baseUrl.replace(/\/+$/, "")}/models`;
 	} else {
+		// anthropic format: normalizeBaseUrl strips /v1, then add /v1/models
 		target = `${normalizeBaseUrl(baseUrl)}/v1/models`;
 	}
 

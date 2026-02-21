@@ -124,8 +124,10 @@ function buildChannelRequest(
 	}
 
 	// Default: openai pass-through
-	const baseUrl = normalizeBaseUrl(channel.base_url);
-	const target = `${baseUrl}${targetPath}${querySuffix}`;
+	// base_url already includes version path (e.g. /v1), so strip /v1 from incoming path
+	const baseUrl = channel.base_url.replace(/\/+$/, "");
+	const subPath = targetPath.replace(/^\/v1\b/, "");
+	const target = `${baseUrl}${subPath}${querySuffix}`;
 	headers.set("Authorization", `Bearer ${channel.api_key}`);
 	headers.set("x-api-key", String(channel.api_key));
 	return { target, headers, body: requestText || undefined };
@@ -219,8 +221,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 
 	const ordered = createWeightedOrder(candidates);
 	const targetPath = c.req.path;
-	const fallbackPath =
-		targetPath.toLowerCase() === "/v1/responses" ? "/responses" : targetPath;
+	const fallbackSubPath =
+		targetPath.toLowerCase() === "/v1/responses" ? "/responses" : null;
 	const querySuffix = c.req.url.includes("?")
 		? `?${c.req.url.split("?")[1]}`
 		: "";
@@ -265,10 +267,10 @@ proxy.all("/*", tokenAuth, async (c) => {
 				if (
 					(channel.api_format ?? "openai") === "openai" &&
 					(response.status === 400 || response.status === 404) &&
-					fallbackPath !== targetPath
+					fallbackSubPath
 				) {
-					const baseUrl = normalizeBaseUrl(channel.base_url);
-					const fallbackTarget = `${baseUrl}${fallbackPath}${querySuffix}`;
+					const strippedBase = normalizeBaseUrl(channel.base_url);
+					const fallbackTarget = `${strippedBase}${fallbackSubPath}${querySuffix}`;
 					const fallbackBody = mutatedStreamOptions
 						? originalRequestText
 						: requestText;
@@ -277,7 +279,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 						headers,
 						body: fallbackBody || undefined,
 					});
-					responsePath = fallbackPath;
+					responsePath = fallbackSubPath;
 				}
 
 				lastResponse = response;
