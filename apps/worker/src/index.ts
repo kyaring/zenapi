@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import type { AppEnv } from "./env";
 import { adminAuth } from "./middleware/adminAuth";
+import anthropicProxyRoutes from "./routes/anthropic-proxy";
 import authRoutes from "./routes/auth";
 import channelRoutes from "./routes/channels";
 import dashboardRoutes from "./routes/dashboard";
@@ -83,6 +84,19 @@ app.use(
 		allowMethods: ["GET", "POST", "OPTIONS"],
 	}),
 );
+app.use(
+	"/anthropic/*",
+	cors({
+		origin: "*",
+		allowHeaders: [
+			"Content-Type",
+			"Authorization",
+			"x-api-key",
+			"anthropic-version",
+		],
+		allowMethods: ["GET", "POST", "OPTIONS"],
+	}),
+);
 
 app.use("/api/*", async (c, next) => {
 	if (
@@ -110,6 +124,7 @@ app.route("/api/user", newapiUserRoutes);
 app.route("/api/group", newapiGroupRoutes);
 
 app.route("/v1", proxyRoutes);
+app.route("/anthropic/v1", anthropicProxyRoutes);
 
 app.notFound(async (c) => {
 	const path = c.req.path;
@@ -117,7 +132,9 @@ app.notFound(async (c) => {
 		path === "/api" ||
 		path.startsWith("/api/") ||
 		path === "/v1" ||
-		path.startsWith("/v1/")
+		path.startsWith("/v1/") ||
+		path === "/anthropic" ||
+		path.startsWith("/anthropic/")
 	) {
 		return c.json({ error: "Not Found" }, 404);
 	}

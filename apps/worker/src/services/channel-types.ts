@@ -1,3 +1,5 @@
+export type ChannelApiFormat = "openai" | "anthropic" | "custom";
+
 export type ChannelRow = {
 	id: string;
 	name: string;
@@ -13,6 +15,8 @@ export type ChannelRow = {
 	metadata_json?: string | null;
 	test_time?: number | string | null;
 	response_time_ms?: number | null;
+	api_format: ChannelApiFormat;
+	custom_headers_json?: string | null;
 	created_at?: string | null;
 	updated_at?: string | null;
 };

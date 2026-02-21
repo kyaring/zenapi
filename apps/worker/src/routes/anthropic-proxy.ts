@@ -1,0 +1,292 @@
+import { Hono } from "hono";
+import type { AppEnv } from "../env";
+import { type TokenRecord, tokenAuth } from "../middleware/tokenAuth";
+import { type ChannelRecord, createWeightedOrder } from "../services/channels";
+import {
+	anthropicToOpenaiRequest,
+	createOpenaiToAnthropicStreamTransform,
+	openaiToAnthropicResponse,
+} from "../services/format-converter";
+import { recordUsage } from "../services/usage";
+import { jsonError } from "../utils/http";
+import { safeJsonParse } from "../utils/json";
+import { normalizeBaseUrl } from "../utils/url";
+import {
+	type NormalizedUsage,
+	normalizeUsage,
+	parseUsageFromHeaders,
+} from "../utils/usage";
+import { channelSupportsModel, filterAllowedChannels } from "./proxy";
+
+const anthropicProxy = new Hono<AppEnv>();
+
+type ExecutionContextLike = {
+	waitUntil: (promise: Promise<unknown>) => void;
+};
+
+function isRetryableStatus(status: number): boolean {
+	return status === 408 || status === 429 || status >= 500;
+}
+
+async function sleep(ms: number): Promise<void> {
+	if (ms <= 0) return;
+	await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Anthropic Messages API compatible proxy handler.
+ * Accepts requests in Anthropic format and routes through channels.
+ */
+anthropicProxy.post("/messages", tokenAuth, async (c) => {
+	const tokenRecord = c.get("tokenRecord") as TokenRecord;
+	const requestText = await c.req.text();
+	const parsedBody = requestText
+		? safeJsonParse<Record<string, unknown> | null>(requestText, null)
+		: null;
+	const model =
+		parsedBody?.model !== undefined && parsedBody?.model !== null
+			? String(parsedBody.model)
+			: null;
+	const isStream = parsedBody?.stream === true;
+
+	// Convert Anthropic request -> OpenAI format for internal use
+	const openaiBody = parsedBody ? anthropicToOpenaiRequest(parsedBody) : null;
+
+	const channelResult = await c.env.DB.prepare(
+		"SELECT * FROM channels WHERE status = ?",
+	)
+		.bind("active")
+		.all();
+	const activeChannels = (channelResult.results ?? []) as ChannelRecord[];
+	const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
+	const modelChannels = allowedChannels.filter((channel) =>
+		channelSupportsModel(channel, model),
+	);
+	const candidates = modelChannels.length > 0 ? modelChannels : allowedChannels;
+
+	if (candidates.length === 0) {
+		return jsonError(c, 503, "no_available_channels", "no_available_channels");
+	}
+
+	const ordered = createWeightedOrder(candidates);
+	const retryRounds = Math.max(1, Number(c.env.PROXY_RETRY_ROUNDS ?? "1"));
+	const retryDelayMs = Math.max(0, Number(c.env.PROXY_RETRY_DELAY_MS ?? "200"));
+	let lastResponse: Response | null = null;
+	let lastChannel: ChannelRecord | null = null;
+	const start = Date.now();
+	let selectedChannel: ChannelRecord | null = null;
+
+	let round = 0;
+	while (round < retryRounds && !selectedChannel) {
+		let shouldRetry = false;
+
+		for (const channel of ordered) {
+			lastChannel = channel;
+			const apiFormat = channel.api_format ?? "openai";
+
+			try {
+				let response: Response;
+
+				if (apiFormat === "anthropic") {
+					// Pass-through: send original Anthropic body directly
+					const baseUrl = normalizeBaseUrl(channel.base_url);
+					const target = `${baseUrl}/v1/messages`;
+					const headers = new Headers();
+					headers.set("x-api-key", String(channel.api_key));
+					headers.set(
+						"anthropic-version",
+						c.req.header("anthropic-version") ?? "2023-06-01",
+					);
+					headers.set("content-type", "application/json");
+
+					response = await fetch(target, {
+						method: "POST",
+						headers,
+						body: requestText,
+					});
+
+					if (response.ok) {
+						selectedChannel = channel;
+						lastResponse = response;
+						break;
+					}
+				} else if (apiFormat === "openai") {
+					// Convert Anthropic -> OpenAI, send to OpenAI upstream
+					const baseUrl = normalizeBaseUrl(channel.base_url);
+					const target = `${baseUrl}/v1/chat/completions`;
+					const headers = new Headers();
+					headers.set("Authorization", `Bearer ${channel.api_key}`);
+					headers.set("content-type", "application/json");
+
+					const bodyToSend = openaiBody
+						? JSON.stringify(openaiBody)
+						: requestText;
+
+					response = await fetch(target, {
+						method: "POST",
+						headers,
+						body: bodyToSend,
+					});
+
+					if (response.ok) {
+						selectedChannel = channel;
+						// Convert OpenAI response back to Anthropic format
+						if (isStream && response.body) {
+							const transform = createOpenaiToAnthropicStreamTransform(
+								model ?? "",
+							);
+							const transformed = response.body.pipeThrough(transform);
+							lastResponse = new Response(transformed, {
+								status: 200,
+								headers: {
+									"content-type": "text/event-stream",
+									"cache-control": "no-cache",
+									connection: "keep-alive",
+								},
+							});
+						} else {
+							const openaiData = (await response.json()) as Record<
+								string,
+								unknown
+							>;
+							const anthropicData = openaiToAnthropicResponse(openaiData);
+							lastResponse = new Response(JSON.stringify(anthropicData), {
+								status: 200,
+								headers: { "content-type": "application/json" },
+							});
+						}
+						break;
+					}
+				} else {
+					// custom: forward as-is
+					const target = channel.base_url;
+					const headers = new Headers();
+					headers.set("Authorization", `Bearer ${channel.api_key}`);
+					headers.set("x-api-key", String(channel.api_key));
+					headers.set("content-type", "application/json");
+
+					if (channel.custom_headers_json) {
+						const customHeaders = safeJsonParse<Record<string, string>>(
+							channel.custom_headers_json,
+							{},
+						);
+						for (const [key, value] of Object.entries(customHeaders)) {
+							headers.set(key, value);
+						}
+					}
+
+					response = await fetch(target, {
+						method: "POST",
+						headers,
+						body: requestText,
+					});
+
+					if (response.ok) {
+						selectedChannel = channel;
+						lastResponse = response;
+						break;
+					}
+				}
+
+				lastResponse = response;
+				if (isRetryableStatus(response.status)) {
+					shouldRetry = true;
+				}
+			} catch {
+				lastResponse = null;
+				shouldRetry = true;
+			}
+		}
+
+		if (selectedChannel || !shouldRetry) {
+			break;
+		}
+
+		round += 1;
+		if (round < retryRounds) {
+			await sleep(retryDelayMs);
+		}
+	}
+
+	const latencyMs = Date.now() - start;
+	const requestPath = "/anthropic/v1/messages";
+
+	if (!lastResponse) {
+		await recordUsage(c.env.DB, {
+			tokenId: tokenRecord.id,
+			model,
+			requestPath,
+			totalTokens: 0,
+			latencyMs,
+			firstTokenLatencyMs: isStream ? null : latencyMs,
+			stream: isStream,
+			status: "error",
+		});
+		return jsonError(c, 502, "upstream_unavailable", "upstream_unavailable");
+	}
+
+	// Record usage
+	const channelForUsage = selectedChannel ?? lastChannel;
+	if (channelForUsage && lastResponse) {
+		const recordFn = async (
+			usage: NormalizedUsage | null,
+			firstTokenLatencyMs?: number | null,
+		) => {
+			const normalized = usage ?? {
+				totalTokens: 0,
+				promptTokens: 0,
+				completionTokens: 0,
+			};
+			await recordUsage(c.env.DB, {
+				tokenId: tokenRecord.id,
+				channelId: channelForUsage.id,
+				model,
+				requestPath,
+				totalTokens: normalized.totalTokens,
+				promptTokens: normalized.promptTokens,
+				completionTokens: normalized.completionTokens,
+				cost: 0,
+				latencyMs,
+				firstTokenLatencyMs:
+					firstTokenLatencyMs ?? (isStream ? null : latencyMs),
+				stream: isStream,
+				status: lastResponse.ok ? "ok" : "error",
+			});
+		};
+
+		const headerUsage = parseUsageFromHeaders(lastResponse.headers);
+
+		if (isStream) {
+			const executionCtx = (c as { executionCtx?: ExecutionContextLike })
+				.executionCtx;
+			const task = recordFn(headerUsage, null).catch(() => undefined);
+			if (executionCtx?.waitUntil) {
+				executionCtx.waitUntil(task);
+			} else {
+				task.catch(() => undefined);
+			}
+		} else {
+			let jsonUsage: NormalizedUsage | null = null;
+			if (
+				lastResponse.ok &&
+				lastResponse.headers.get("content-type")?.includes("application/json")
+			) {
+				const data = await lastResponse
+					.clone()
+					.json()
+					.catch(() => null);
+				if (data && typeof data === "object") {
+					const anthropicUsage = (data as Record<string, unknown>).usage;
+					if (anthropicUsage) {
+						jsonUsage = normalizeUsage(anthropicUsage);
+					}
+				}
+			}
+			await recordFn(jsonUsage ?? headerUsage, latencyMs);
+		}
+	}
+
+	return lastResponse;
+});
+
+export default anthropicProxy;

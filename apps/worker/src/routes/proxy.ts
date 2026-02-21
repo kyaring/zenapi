@@ -6,6 +6,11 @@ import {
 	createWeightedOrder,
 	extractModels,
 } from "../services/channels";
+import {
+	anthropicToOpenaiResponse,
+	createAnthropicToOpenaiStreamTransform,
+	openaiToAnthropicRequest,
+} from "../services/format-converter";
 import { recordUsage } from "../services/usage";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
@@ -24,7 +29,7 @@ type ExecutionContextLike = {
 	waitUntil: (promise: Promise<unknown>) => void;
 };
 
-function channelSupportsModel(
+export function channelSupportsModel(
 	channel: ChannelRecord,
 	model?: string | null,
 ): boolean {
@@ -35,7 +40,7 @@ function channelSupportsModel(
 	return models.some((entry) => entry.id === model);
 }
 
-function filterAllowedChannels(
+export function filterAllowedChannels(
 	channels: ChannelRecord[],
 	tokenRecord: TokenRecord,
 ): ChannelRecord[] {
@@ -52,31 +57,114 @@ function filterAllowedChannels(
 
 /**
  * Determines whether a response status should be retried.
- *
- * Args:
- *   status: HTTP response status code.
- *
- * Returns:
- *   True if the status is retryable.
  */
 function isRetryableStatus(status: number): boolean {
 	return status === 408 || status === 429 || status >= 500;
 }
 
-/**
- * Waits before the next retry round.
- *
- * Args:
- *   ms: Delay in milliseconds.
- *
- * Returns:
- *   Promise resolved after delay.
- */
 async function sleep(ms: number): Promise<void> {
 	if (ms <= 0) {
 		return;
 	}
 	await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Builds per-channel fetch target and body based on channel api_format.
+ * Returns the target URL, headers, and request body.
+ */
+function buildChannelRequest(
+	channel: ChannelRecord,
+	targetPath: string,
+	querySuffix: string,
+	incomingHeaders: Headers,
+	requestText: string,
+	parsedBody: Record<string, unknown> | null,
+	isStream: boolean,
+): { target: string; headers: Headers; body: string | undefined } {
+	const apiFormat = channel.api_format ?? "openai";
+	const headers = new Headers(incomingHeaders);
+	headers.delete("host");
+	headers.delete("content-length");
+
+	if (apiFormat === "anthropic") {
+		const baseUrl = normalizeBaseUrl(channel.base_url);
+		const target = `${baseUrl}/v1/messages`;
+		headers.set("x-api-key", String(channel.api_key));
+		headers.set("anthropic-version", "2023-06-01");
+		headers.set("content-type", "application/json");
+		headers.delete("Authorization");
+
+		const anthropicBody = parsedBody
+			? openaiToAnthropicRequest(parsedBody)
+			: {};
+		if (isStream) {
+			(anthropicBody as Record<string, unknown>).stream = true;
+		}
+		return { target, headers, body: JSON.stringify(anthropicBody) };
+	}
+
+	if (apiFormat === "custom") {
+		// For custom format, base_url IS the full target URL
+		const target = `${channel.base_url}${querySuffix}`;
+		headers.set("Authorization", `Bearer ${channel.api_key}`);
+		headers.set("x-api-key", String(channel.api_key));
+
+		// Merge custom headers
+		if (channel.custom_headers_json) {
+			const customHeaders = safeJsonParse<Record<string, string>>(
+				channel.custom_headers_json,
+				{},
+			);
+			for (const [key, value] of Object.entries(customHeaders)) {
+				headers.set(key, value);
+			}
+		}
+		return { target, headers, body: requestText || undefined };
+	}
+
+	// Default: openai pass-through
+	const baseUrl = normalizeBaseUrl(channel.base_url);
+	const target = `${baseUrl}${targetPath}${querySuffix}`;
+	headers.set("Authorization", `Bearer ${channel.api_key}`);
+	headers.set("x-api-key", String(channel.api_key));
+	return { target, headers, body: requestText || undefined };
+}
+
+/**
+ * Converts upstream response based on channel format back to OpenAI format.
+ */
+async function convertResponse(
+	channel: ChannelRecord,
+	response: Response,
+	isStream: boolean,
+): Promise<Response> {
+	const apiFormat = channel.api_format ?? "openai";
+
+	if (apiFormat === "anthropic" && response.ok) {
+		if (isStream && response.body) {
+			const transform = createAnthropicToOpenaiStreamTransform();
+			const transformed = response.body.pipeThrough(transform);
+			return new Response(transformed, {
+				status: response.status,
+				headers: {
+					"content-type": "text/event-stream",
+					"cache-control": "no-cache",
+					connection: "keep-alive",
+				},
+			});
+		}
+
+		const anthropicData = (await response.json()) as Record<string, unknown>;
+		const openaiData = anthropicToOpenaiResponse(anthropicData);
+		return new Response(JSON.stringify(openaiData), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	}
+
+	// openai or custom: pass through as-is
+	return response;
 }
 
 /**
@@ -149,25 +237,37 @@ proxy.all("/*", tokenAuth, async (c) => {
 		let shouldRetry = false;
 		for (const channel of ordered) {
 			lastChannel = channel;
-			const baseUrl = normalizeBaseUrl(channel.base_url);
-			const target = `${baseUrl}${targetPath}${querySuffix}`;
-			const headers = new Headers(c.req.header());
-			headers.set("Authorization", `Bearer ${channel.api_key}`);
-			headers.set("x-api-key", String(channel.api_key));
-			headers.delete("host");
-			headers.delete("content-length");
+			const incomingHeaders = new Headers(c.req.header());
+
+			const {
+				target,
+				headers,
+				body: channelBody,
+			} = buildChannelRequest(
+				channel,
+				targetPath,
+				querySuffix,
+				incomingHeaders,
+				requestText,
+				parsedBody,
+				isStream,
+			);
 
 			try {
 				let response = await fetch(target, {
 					method: c.req.method,
 					headers,
-					body: requestText || undefined,
+					body: channelBody,
 				});
 				let responsePath = targetPath;
+
+				// Fallback only applies to openai-format channels
 				if (
+					(channel.api_format ?? "openai") === "openai" &&
 					(response.status === 400 || response.status === 404) &&
 					fallbackPath !== targetPath
 				) {
+					const baseUrl = normalizeBaseUrl(channel.base_url);
 					const fallbackTarget = `${baseUrl}${fallbackPath}${querySuffix}`;
 					const fallbackBody = mutatedStreamOptions
 						? originalRequestText
@@ -183,6 +283,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 				lastResponse = response;
 				lastRequestPath = responsePath;
 				if (response.ok) {
+					// Convert response based on channel format
+					lastResponse = await convertResponse(channel, response, isStream);
 					selectedChannel = channel;
 					break;
 				}

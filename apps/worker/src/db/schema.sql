@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS channels (
   metadata_json TEXT,
   test_time INTEGER,
   response_time_ms INTEGER,
+  api_format TEXT NOT NULL DEFAULT 'openai',
+  custom_headers_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

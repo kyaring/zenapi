@@ -1,5 +1,5 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import type { ChannelRow } from "./channel-types";
+import type { ChannelApiFormat, ChannelRow } from "./channel-types";
 
 type ChannelFilters = {
 	status?: string | null;
@@ -151,6 +151,8 @@ export type ChannelInsertInput = {
 	group_name: string | null;
 	priority: number;
 	metadata_json: string | null;
+	api_format: ChannelApiFormat;
+	custom_headers_json: string | null;
 	created_at: string;
 	updated_at: string;
 };
@@ -161,7 +163,7 @@ export async function insertChannel(
 ): Promise<void> {
 	await db
 		.prepare(
-			"INSERT INTO channels (id, name, base_url, api_key, weight, status, rate_limit, models_json, type, group_name, priority, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO channels (id, name, base_url, api_key, weight, status, rate_limit, models_json, type, group_name, priority, metadata_json, api_format, custom_headers_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		)
 		.bind(
 			input.id,
@@ -176,6 +178,8 @@ export async function insertChannel(
 			input.group_name,
 			input.priority,
 			input.metadata_json,
+			input.api_format,
+			input.custom_headers_json,
 			input.created_at,
 			input.updated_at,
 		)
@@ -194,6 +198,8 @@ export type ChannelUpdateInput = {
 	group_name: string | null;
 	priority: number;
 	metadata_json: string | null;
+	api_format: ChannelApiFormat;
+	custom_headers_json: string | null;
 	updated_at: string;
 };
 
@@ -204,7 +210,7 @@ export async function updateChannel(
 ): Promise<void> {
 	await db
 		.prepare(
-			"UPDATE channels SET name = ?, base_url = ?, api_key = ?, weight = ?, status = ?, rate_limit = ?, models_json = ?, type = ?, group_name = ?, priority = ?, metadata_json = ?, updated_at = ? WHERE id = ?",
+			"UPDATE channels SET name = ?, base_url = ?, api_key = ?, weight = ?, status = ?, rate_limit = ?, models_json = ?, type = ?, group_name = ?, priority = ?, metadata_json = ?, api_format = ?, custom_headers_json = ?, updated_at = ? WHERE id = ?",
 		)
 		.bind(
 			input.name,
@@ -218,6 +224,8 @@ export async function updateChannel(
 			input.group_name,
 			input.priority,
 			input.metadata_json,
+			input.api_format,
+			input.custom_headers_json,
 			input.updated_at,
 			id,
 		)

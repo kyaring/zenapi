@@ -1,3 +1,5 @@
+export type ChannelApiFormat = "openai" | "anthropic" | "custom";
+
 export type Channel = {
 	id: string;
 	name: string;
@@ -6,6 +8,8 @@ export type Channel = {
 	weight: number;
 	status: string;
 	models_json?: string;
+	api_format: ChannelApiFormat;
+	custom_headers_json?: string | null;
 };
 
 export type Token = {
@@ -93,6 +97,8 @@ export type ChannelForm = {
 	base_url: string;
 	api_key: string;
 	weight: number;
+	api_format: ChannelApiFormat;
+	custom_headers: string;
 };
 
 export type SettingsForm = {

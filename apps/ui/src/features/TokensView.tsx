@@ -22,12 +22,6 @@ const pageSizeOptions = [10, 20, 50];
 
 /**
  * Renders the tokens management view.
- *
- * Args:
- *   props: Tokens view props.
- *
- * Returns:
- *   Tokens JSX element.
  */
 export const TokensView = ({
 	pagedTokens,
@@ -60,7 +54,7 @@ export const TokensView = ({
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
 						<button
-							class="h-9 rounded-full bg-stone-900 px-4 text-xs font-semibold text-white transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+							class="h-10 md:h-9 rounded-full bg-stone-900 px-4 text-xs font-semibold text-white transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
 							type="button"
 							onClick={onCreate}
 						>
@@ -68,7 +62,9 @@ export const TokensView = ({
 						</button>
 					</div>
 				</div>
-				<div class="mt-4 overflow-hidden rounded-xl border border-stone-200">
+
+				{/* Desktop table */}
+				<div class="mt-4 hidden md:block overflow-hidden rounded-xl border border-stone-200">
 					<div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1.2fr)] gap-3 bg-stone-50 px-4 py-3 text-xs uppercase tracking-widest text-stone-500">
 						<div>名称</div>
 						<div>状态</div>
@@ -144,13 +140,85 @@ export const TokensView = ({
 						</div>
 					)}
 				</div>
+
+				{/* Mobile card layout */}
+				<div class="mt-4 md:hidden space-y-3">
+					{pagedTokens.length === 0 ? (
+						<div class="px-4 py-10 text-center text-sm text-stone-500 rounded-xl border border-stone-200">
+							暂无令牌，请先创建。
+						</div>
+					) : (
+						pagedTokens.map((tokenItem) => {
+							const isActive = tokenItem.status === "active";
+							return (
+								<div
+									class="rounded-xl border border-stone-200 bg-white p-4"
+									key={tokenItem.id}
+								>
+									<div class="flex items-start justify-between gap-2">
+										<div class="min-w-0 flex-1">
+											<span class="truncate font-semibold text-stone-900 text-sm block">
+												{tokenItem.name}
+											</span>
+											<span class="text-xs text-stone-500 mt-0.5 block">
+												{tokenItem.key_prefix ?? "-"}
+											</span>
+										</div>
+										<span
+											class={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+												isActive
+													? "border-emerald-100 bg-emerald-50 text-emerald-600"
+													: "border-stone-200 bg-stone-100 text-stone-500"
+											}`}
+										>
+											{isActive ? "启用" : "禁用"}
+										</span>
+									</div>
+									<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
+										<span>
+											额度:{" "}
+											<span class="font-semibold text-stone-700">
+												{tokenItem.quota_used} / {tokenItem.quota_total ?? "∞"}
+											</span>
+										</span>
+										<span>{formatDateTime(tokenItem.created_at)}</span>
+									</div>
+									<div class="mt-3 flex flex-wrap gap-2">
+										<button
+											class="h-10 rounded-full border border-stone-200 bg-stone-100 px-3 text-xs font-semibold text-stone-900 transition-all duration-200 ease-in-out hover:shadow-lg"
+											type="button"
+											onClick={() => onReveal(tokenItem.id)}
+										>
+											查看
+										</button>
+										<button
+											class="h-10 rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-600 transition-all duration-200 ease-in-out hover:text-stone-900 hover:shadow-lg"
+											type="button"
+											onClick={() => onToggle(tokenItem.id, tokenItem.status)}
+										>
+											切换
+										</button>
+										<button
+											class="h-10 rounded-full border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-500 transition-all duration-200 ease-in-out hover:text-stone-900 hover:shadow-lg"
+											type="button"
+											onClick={() => onDelete(tokenItem.id)}
+										>
+											删除
+										</button>
+									</div>
+								</div>
+							);
+						})
+					)}
+				</div>
+
 				<div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-stone-500">
 					<div class="flex flex-wrap items-center gap-2">
 						<span class="text-xs text-stone-500">
 							共 {tokenTotal} 条 · {tokenTotalPages} 页
 						</span>
 						<button
-							class="h-8 w-8 rounded-full border border-stone-200 bg-white text-xs font-semibold text-stone-600 transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+							class="h-10 w-10 md:h-8 md:w-8 rounded-full border border-stone-200 bg-white text-xs font-semibold text-stone-600 transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
 							type="button"
 							disabled={tokenPage <= 1}
 							onClick={() => onPageChange(Math.max(1, tokenPage - 1))}
@@ -164,7 +232,7 @@ export const TokensView = ({
 								</span>
 							) : (
 								<button
-									class={`h-8 min-w-8 rounded-full border px-3 text-xs font-semibold transition-all duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
+									class={`h-10 min-w-10 md:h-8 md:min-w-8 rounded-full border px-3 text-xs font-semibold transition-all duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
 										item === tokenPage
 											? "border-stone-900 bg-stone-900 text-white shadow-md"
 											: "border-stone-200 bg-white text-stone-600 hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-md"
@@ -178,7 +246,7 @@ export const TokensView = ({
 							),
 						)}
 						<button
-							class="h-8 w-8 rounded-full border border-stone-200 bg-white text-xs font-semibold text-stone-600 transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+							class="h-10 w-10 md:h-8 md:w-8 rounded-full border border-stone-200 bg-white text-xs font-semibold text-stone-600 transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
 							type="button"
 							disabled={tokenPage >= tokenTotalPages}
 							onClick={() =>
@@ -209,8 +277,8 @@ export const TokensView = ({
 				</div>
 			</div>
 			{isTokenModalOpen && (
-				<div class="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4 py-8">
-					<div class="w-full max-w-xl rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl">
+				<div class="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-stone-900/40 px-0 md:px-4 py-0 md:py-8">
+					<div class="w-full max-w-xl rounded-t-2xl md:rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl">
 						<div class="flex flex-wrap items-start justify-between gap-3">
 							<div>
 								<h3 class="mb-1 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
@@ -221,7 +289,7 @@ export const TokensView = ({
 								</p>
 							</div>
 							<button
-								class="h-9 rounded-full border border-stone-200 bg-stone-50 px-3 text-xs font-semibold text-stone-500 transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+								class="h-10 md:h-9 rounded-full border border-stone-200 bg-stone-50 px-3 text-xs font-semibold text-stone-500 transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:text-stone-900 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
 								type="button"
 								onClick={onCloseModal}
 							>

@@ -12,6 +12,7 @@ import {
 	fetchChannelModels,
 	updateChannelTestResult,
 } from "../services/channel-testing";
+import type { ChannelApiFormat } from "../services/channel-types";
 import { generateToken } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
@@ -31,6 +32,8 @@ type ChannelPayload = {
 	status?: string;
 	rate_limit?: number;
 	models?: unknown[];
+	api_format?: string;
+	custom_headers?: string;
 };
 
 /**
@@ -81,11 +84,16 @@ channels.post("/", async (c) => {
 
 	const id = requestedId ?? generateToken("ch_");
 	const now = nowIso();
+	const apiFormat = (body.api_format ?? "openai") as ChannelApiFormat;
+	const customHeadersJson = body.custom_headers?.trim() || null;
 
 	await insertChannel(c.env.DB, {
 		id,
 		name: body.name,
-		base_url: normalizeBaseUrl(String(body.base_url)),
+		base_url:
+			apiFormat === "custom"
+				? String(body.base_url)
+				: normalizeBaseUrl(String(body.base_url)),
 		api_key: body.api_key,
 		weight: Number(body.weight ?? 1),
 		status: body.status ?? "active",
@@ -95,6 +103,8 @@ channels.post("/", async (c) => {
 		group_name: null,
 		priority: 0,
 		metadata_json: null,
+		api_format: apiFormat,
+		custom_headers_json: customHeadersJson,
 		created_at: now,
 		updated_at: now,
 	});
@@ -118,10 +128,21 @@ channels.patch("/:id", async (c) => {
 	}
 
 	const models = body.models ?? safeJsonParse(current.models_json, []);
+	const apiFormat = (body.api_format ??
+		current.api_format ??
+		"openai") as ChannelApiFormat;
+	const customHeadersJson =
+		body.custom_headers !== undefined
+			? body.custom_headers?.trim() || null
+			: (current.custom_headers_json ?? null);
+	const baseUrl =
+		apiFormat === "custom"
+			? String(body.base_url ?? current.base_url)
+			: normalizeBaseUrl(String(body.base_url ?? current.base_url));
 
 	await updateChannel(c.env.DB, id, {
 		name: body.name ?? current.name,
-		base_url: normalizeBaseUrl(String(body.base_url ?? current.base_url)),
+		base_url: baseUrl,
 		api_key: body.api_key ?? current.api_key,
 		weight: Number(body.weight ?? current.weight ?? 1),
 		status: body.status ?? current.status,
@@ -131,6 +152,8 @@ channels.patch("/:id", async (c) => {
 		group_name: current.group_name ?? null,
 		priority: current.priority ?? 0,
 		metadata_json: current.metadata_json ?? null,
+		api_format: apiFormat,
+		custom_headers_json: customHeadersJson,
 		updated_at: nowIso(),
 	});
 

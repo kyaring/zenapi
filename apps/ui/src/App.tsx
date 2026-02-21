@@ -97,6 +97,7 @@ const App = () => {
 	}));
 	const [isChannelModalOpen, setChannelModalOpen] = useState(false);
 	const [isTokenModalOpen, setTokenModalOpen] = useState(false);
+	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
 
 	const updateToken = useCallback((next: string | null) => {
 		setToken(next);
@@ -275,6 +276,11 @@ const App = () => {
 			history.pushState(null, "", nextPath);
 		}
 		setActiveTab(tabId);
+		setMobileMenuOpen(false);
+	}, []);
+
+	const toggleMobileMenu = useCallback(() => {
+		setMobileMenuOpen((prev) => !prev);
 	}, []);
 
 	const closeChannelModal = useCallback(() => {
@@ -302,6 +308,8 @@ const App = () => {
 			base_url: channel.base_url ?? "",
 			api_key: channel.api_key ?? "",
 			weight: channel.weight ?? 1,
+			api_format: channel.api_format ?? "openai",
+			custom_headers: channel.custom_headers_json ?? "",
 		});
 		setChannelModalOpen(true);
 		setNotice("");
@@ -331,6 +339,8 @@ const App = () => {
 					base_url: channelForm.base_url.trim(),
 					api_key: channelForm.api_key.trim(),
 					weight: Number(channelForm.weight),
+					api_format: channelForm.api_format,
+					custom_headers: channelForm.custom_headers.trim() || undefined,
 				};
 				if (editingChannel) {
 					await apiFetch(`/api/channels/${editingChannel.id}`, {
@@ -652,7 +662,9 @@ const App = () => {
 					activeLabel={activeLabel}
 					token={token}
 					notice={notice}
+					isMobileMenuOpen={isMobileMenuOpen}
 					onTabChange={handleTabChange}
+					onToggleMobileMenu={toggleMobileMenu}
 					onLogout={handleLogout}
 				>
 					{renderContent()}
