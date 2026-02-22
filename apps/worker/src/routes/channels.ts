@@ -17,6 +17,7 @@ import { getSiteMode } from "../services/settings";
 import { generateToken } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
+import { parseApiKeys } from "../utils/keys";
 import { nowIso } from "../utils/time";
 import { normalizeBaseUrl } from "../utils/url";
 
@@ -182,7 +183,7 @@ channels.post("/:id/test", async (c) => {
 
 	const result = await fetchChannelModels(
 		String(channel.base_url),
-		String(channel.api_key),
+		parseApiKeys(String(channel.api_key))[0] ?? String(channel.api_key),
 		channel.api_format,
 		channel.custom_headers_json,
 	);

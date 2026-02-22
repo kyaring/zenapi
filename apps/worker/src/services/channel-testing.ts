@@ -109,13 +109,14 @@ export async function updateChannelTestResult(
 			});
 			const existingMap = new Map<
 				string,
-				{ input_price?: number; output_price?: number; shared?: boolean }
+				{ input_price?: number; output_price?: number; shared?: boolean; enabled?: boolean }
 			>();
 			for (const p of existingPricings) {
 				existingMap.set(p.id, {
 					input_price: p.input_price,
 					output_price: p.output_price,
 					shared: p.shared,
+					enabled: p.enabled,
 				});
 			}
 			const newModels = safeJsonParse<Array<{ id?: string }>>(
@@ -137,6 +138,10 @@ export async function updateChannelTestResult(
 					entry.shared = existing.shared;
 				} else if (result.defaultShared) {
 					entry.shared = true;
+				}
+				// Preserve existing enabled flag
+				if (existing?.enabled != null) {
+					entry.enabled = existing.enabled;
 				}
 				return entry;
 			});

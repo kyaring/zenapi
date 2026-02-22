@@ -22,6 +22,7 @@ import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { extractReasoningEffort } from "../utils/reasoning";
+import { parseApiKeys, shuffleArray } from "../utils/keys";
 import { isRetryableStatus, sleep } from "../utils/retry";
 import { resolveChannelRoute } from "../services/channel-route";
 import { normalizeBaseUrl } from "../utils/url";
@@ -90,7 +91,7 @@ function isChatPath(path: string): boolean {
  * Builds per-channel fetch target and body based on channel api_format.
  * Returns the target URL, headers, and request body.
  */
-function buildChannelRequest(
+export function buildChannelRequest(
 	channel: ChannelRecord,
 	targetPath: string,
 	querySuffix: string,
@@ -98,7 +99,9 @@ function buildChannelRequest(
 	requestText: string,
 	parsedBody: Record<string, unknown> | null,
 	isStream: boolean,
+	apiKey?: string,
 ): { target: string; headers: Headers; body: string | undefined } {
+	const effectiveKey = apiKey ?? channel.api_key;
 	const apiFormat = channel.api_format ?? "openai";
 	const headers = new Headers(incomingHeaders);
 	headers.delete("host");
@@ -107,7 +110,7 @@ function buildChannelRequest(
 	if (apiFormat === "anthropic") {
 		const baseUrl = normalizeBaseUrl(channel.base_url);
 		const target = `${baseUrl}/v1/messages`;
-		headers.set("x-api-key", String(channel.api_key));
+		headers.set("x-api-key", String(effectiveKey));
 		headers.set("anthropic-version", "2023-06-01");
 		headers.set("content-type", "application/json");
 		headers.delete("Authorization");
@@ -124,8 +127,8 @@ function buildChannelRequest(
 	if (apiFormat === "custom") {
 		// For custom format, base_url IS the full target URL
 		const target = `${channel.base_url}${querySuffix}`;
-		headers.set("Authorization", `Bearer ${channel.api_key}`);
-		headers.set("x-api-key", String(channel.api_key));
+		headers.set("Authorization", `Bearer ${effectiveKey}`);
+		headers.set("x-api-key", String(effectiveKey));
 
 		// Merge custom headers
 		if (channel.custom_headers_json) {
@@ -145,15 +148,15 @@ function buildChannelRequest(
 	const baseUrl = channel.base_url.replace(/\/+$/, "");
 	const subPath = targetPath.replace(/^\/v1\b/, "");
 	const target = `${baseUrl}${subPath}${querySuffix}`;
-	headers.set("Authorization", `Bearer ${channel.api_key}`);
-	headers.set("x-api-key", String(channel.api_key));
+	headers.set("Authorization", `Bearer ${effectiveKey}`);
+	headers.set("x-api-key", String(effectiveKey));
 	return { target, headers, body: requestText || undefined };
 }
 
 /**
  * Converts upstream response based on channel format back to OpenAI format.
  */
-async function convertResponse(
+export async function convertResponse(
 	channel: ChannelRecord,
 	response: Response,
 	isStream: boolean,
@@ -325,63 +328,79 @@ proxy.all("/*", tokenAuth, async (c) => {
 		let shouldRetry = false;
 		for (const channel of ordered) {
 			lastChannel = channel;
-			const incomingHeaders = new Headers(c.req.header());
+			const keys = shuffleArray(parseApiKeys(channel.api_key));
+			let channelRetryable = false;
 
-			const {
-				target,
-				headers,
-				body: channelBody,
-			} = buildChannelRequest(
-				channel,
-				targetPath,
-				querySuffix,
-				incomingHeaders,
-				requestText,
-				parsedBody,
-				isStream,
-			);
+			for (const apiKey of keys) {
+				const incomingHeaders = new Headers(c.req.header());
 
-			try {
-				let response = await fetch(target, {
-					method: c.req.method,
+				const {
+					target,
 					headers,
 					body: channelBody,
-				});
-				let responsePath = targetPath;
+				} = buildChannelRequest(
+					channel,
+					targetPath,
+					querySuffix,
+					incomingHeaders,
+					requestText,
+					parsedBody,
+					isStream,
+					apiKey,
+				);
 
-				// Fallback only applies to openai-format channels
-				if (
-					(channel.api_format ?? "openai") === "openai" &&
-					(response.status === 400 || response.status === 404) &&
-					fallbackSubPath
-				) {
-					const strippedBase = normalizeBaseUrl(channel.base_url);
-					const fallbackTarget = `${strippedBase}${fallbackSubPath}${querySuffix}`;
-					const fallbackBody = mutatedStreamOptions
-						? originalRequestText
-						: requestText;
-					response = await fetch(fallbackTarget, {
+				try {
+					let response = await fetch(target, {
 						method: c.req.method,
 						headers,
-						body: fallbackBody || undefined,
+						body: channelBody,
 					});
-					responsePath = fallbackSubPath;
-				}
+					let responsePath = targetPath;
 
-				lastResponse = response;
-				lastRequestPath = responsePath;
-				if (response.ok) {
-					// Convert response based on channel format
-					lastResponse = await convertResponse(channel, response, isStream);
-					selectedChannel = channel;
-					break;
-				}
+					// Fallback only applies to openai-format channels
+					if (
+						(channel.api_format ?? "openai") === "openai" &&
+						(response.status === 400 || response.status === 404) &&
+						fallbackSubPath
+					) {
+						const strippedBase = normalizeBaseUrl(channel.base_url);
+						const fallbackTarget = `${strippedBase}${fallbackSubPath}${querySuffix}`;
+						const fallbackBody = mutatedStreamOptions
+							? originalRequestText
+							: requestText;
+						response = await fetch(fallbackTarget, {
+							method: c.req.method,
+							headers,
+							body: fallbackBody || undefined,
+						});
+						responsePath = fallbackSubPath;
+					}
 
-				if (isRetryableStatus(response.status)) {
-					shouldRetry = true;
+					lastResponse = response;
+					lastRequestPath = responsePath;
+					if (response.ok) {
+						// Convert response based on channel format
+						lastResponse = await convertResponse(channel, response, isStream);
+						selectedChannel = channel;
+						break;
+					}
+
+					if (isRetryableStatus(response.status)) {
+						channelRetryable = true;
+					} else {
+						// Non-retryable error — skip remaining keys for this channel
+						break;
+					}
+				} catch {
+					lastResponse = null;
+					channelRetryable = true;
 				}
-			} catch {
-				lastResponse = null;
+			}
+
+			if (selectedChannel) {
+				break;
+			}
+			if (channelRetryable) {
 				shouldRetry = true;
 			}
 		}

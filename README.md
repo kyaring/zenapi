@@ -1,184 +1,354 @@
-# api-worker
+# ZenApi
 
-简易版 new-api：Cloudflare Workers + D1 后端，Vite 静态管理台。
-管理台构建产物通过 Worker Static Assets 与 Worker 一起部署。
+轻量级 AI API 网关，基于 Cloudflare Workers + D1，内置管理后台与多用户系统。
+管理台构建产物通过 Worker Static Assets 与 Worker 一起部署，无需额外托管。
+
+## 功能特性
+
+- **多格式代理** — 同时兼容 OpenAI (`/v1/*`) 和 Anthropic (`/anthropic/v1/*`) 协议，支持自定义格式渠道
+- **智能负载均衡** — 按权重随机分配请求到多个渠道，自动故障重试，单渠道支持多 API Key 失败自动换 Key
+- **格式互转** — OpenAI ↔ Anthropic 请求/响应自动转换，上游无感知
+- **精细模型管控** — 渠道内单独启用/禁用某个模型，按模型定价，支持共享/私有设置
+- **用量追踪与计费** — 按模型定价记录 token 消耗、费用、延迟，支持用户余额扣减
+- **多站点模式** — 个人模式 / 服务模式 / 共享模式，适配不同部署场景
+- **用户系统** — 用户注册登录、令牌管理、用量查看、渠道贡献（共享模式）
+- **可用性监测** — 实时渠道健康状态、成功率、延迟趋势
+- **对话测试** — 管理后台内置 Playground，选择模型直接测试对话
+- **一键部署** — GitHub Actions 自动构建部署到 Cloudflare Workers
 
 ## 目录结构
 
-- `apps/worker` Cloudflare Worker (Hono)
-- `apps/ui` 管理台 (Vite)
-- `tests` 基础单元测试
+```
+apps/
+├── worker/          # Cloudflare Worker 后端 (Hono)
+│   ├── src/
+│   │   ├── index.ts           # 入口：路由注册、中间件
+│   │   ├── routes/            # API 路由
+│   │   ├── services/          # 业务逻辑
+│   │   ├── middleware/        # 鉴权中间件
+│   │   └── utils/             # 工具函数
+│   ├── migrations/            # D1 数据库迁移
+│   └── wrangler.toml          # Cloudflare 配置
+└── ui/              # 管理台前端 (Vite + Hono JSX)
+    └── src/
+        ├── AdminApp.tsx       # 管理后台主组件
+        ├── UserApp.tsx        # 用户端主组件
+        ├── core/              # 类型、常量、工具
+        └── features/          # 各功能视图组件
+tests/               # 单元测试
+```
 
-## Action 自动部署流程（GitHub Actions）
+## 快速开始
 
-工作流名称：`Deploy SPA CF Workers[Worker一体化部署]`
+### 前置要求
 
-### 1) 配置 GitHub Secrets
+- [Bun](https://bun.sh/) 1.3.9+
+- Cloudflare 账号（用于 Wrangler 和 D1）
 
-在仓库 Settings → Secrets and variables → Actions 中新增：
-
-- `CLOUDFLARE_API_TOKEN`：需包含 Workers + D1 的读写权限
-- `CLOUDFLARE_ACCOUNT_ID`：Cloudflare 账户 ID
-
-### 2) 可选配置 Actions 变量
-
-- `SPA_DEPLOY`：自动部署开关（`true`/`false`），未设置时默认启用
-
-### 3) 触发方式
-
-- 自动触发：push 到 `main` 或 `master`，且变更命中 `apps/ui/**` 或 `apps/worker/**`
-  - 受 `SPA_DEPLOY` 控制
-- 手动触发：Actions 页面选择工作流并 Run workflow
-  - 默认不受 `SPA_DEPLOY` 影响（除非设置 `from_panel=true`）
-- 外部触发：`repository_dispatch`（type = `deploy-spa-button`）
-  - 不受 `SPA_DEPLOY` 影响
-
-### 4) 触发参数（workflow_dispatch）
-
-- `deploy_target`：`frontend`/`backend`/`both`/`auto`（默认 auto）
-  - `frontend` 仍会部署 Worker（静态资源随 Worker 发布）
-  - `auto` 在 push 时按变更范围决定，手动触发默认部署前后端
-- `apply_migrations`：`true`/`false`/`auto`（默认 auto）
-  - `auto` 仅在 push 且迁移文件变更时执行
-- `from_panel`：`true`/`false`（是否由控制面板触发；为 true 时会尊重 `SPA_DEPLOY`）
-
-### 5) 部署步骤摘要
-
-- Checkout → 安装 Bun 1.3.9 → `bun install`
-- 构建管理台（`apps/ui/dist`），并校验产物
-- 关闭 wrangler telemetry
-- 创建/校验 D1（`api-worker`），在 CI 内写入 `apps/worker/wrangler.toml` 的 `database_id`
-- 按需执行远程迁移
-- `wrangler deploy` 部署 Worker
-
-## 本地开发流程
-
-### 0) 前置要求
-
-- Bun 1.3.9（见 `package.json` 的 `packageManager`）
-- Cloudflare Wrangler（通过 `bunx wrangler` 使用）
-
-### 1) 安装依赖
+### 本地开发
 
 ```bash
+# 安装依赖
 bun install
-```
 
-### 2) 启动 Worker（后端）
+# 本地数据库迁移（首次启动必须）
+bun run --filter api-worker db:migrate
 
-```bash
+# 启动后端（默认 8787 端口）
 bun run dev:worker
-```
 
-说明：
-
-- 默认使用 `apps/worker/wrangler.toml`
-- 本地端口通常为 8787（wrangler 默认）
-- D1 使用本地数据库
-
-环境变量/配置（`apps/worker/wrangler.toml` 或 `wrangler secret put`）：
-
-- `CORS_ORIGIN` 允许的管理台来源（如 UI 使用 4173 端口，请同步调整）
-- `PROXY_RETRY_ROUNDS` 代理失败轮询次数（默认 2）
-- `PROXY_RETRY_DELAY_MS` 轮询间隔（毫秒，默认 200）
-
-系统设置（管理台 → 系统设置）：
-
-- 日志保留天数（默认 30）
-- 会话时长（小时，默认 12）
-- 管理员密码（首次登录在登录页输入密码将自动设置，可在系统设置中修改）
-
-### 3) 启动管理台 UI
-
-```bash
+# 启动前端（默认 4173 端口）
 bun run dev:ui
 ```
 
-说明：
+首次访问管理台时输入的密码将自动设置为管理员密码。
 
-- 默认端口为 4173（见根目录脚本）
+### 常用命令
 
-前端配置（`apps/ui/.env` 可选）：
+| 命令 | 说明 |
+|------|------|
+| `bun run dev:worker` | 启动后端开发服务 |
+| `bun run dev:ui` | 启动前端开发服务 |
+| `bun run test` | 运行测试 |
+| `bun run typecheck` | TypeScript 类型检查 |
+| `bun run lint` | Biome 代码检查 |
+| `bun run format` | Biome 代码格式化 |
 
-- `VITE_API_BASE` 管理 API 基址（默认同域）
-- `VITE_API_TARGET` 本地开发代理目标（默认 http://localhost:8787）
+### 环境变量
 
-### 4) 本地数据库迁移（可选/首次启动推荐）
+**Worker 配置** (`wrangler.toml` 或 `wrangler secret put`)：
 
-```bash
-bun run --filter api-worker db:migrate
-```
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CORS_ORIGIN` | `http://localhost:5173` | 允许的 CORS 来源 |
+| `PROXY_RETRY_ROUNDS` | `2` | 代理失败重试轮数 |
+| `PROXY_RETRY_DELAY_MS` | `200` | 重试间隔（毫秒） |
 
-### 5) 常用命令
+**前端配置** (`apps/ui/.env`，可选)：
 
-- `bun run test`
-- `bun run typecheck`
-- `bun run lint`
-- `bun run format`
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VITE_API_BASE` | 同域 | API 基址 |
+| `VITE_API_TARGET` | `http://localhost:8787` | 本地代理目标 |
 
-## API 接口
+**系统设置**（管理台 → 系统设置）：
 
-### 鉴权方式概览
+| 设置 | 默认值 | 说明 |
+|------|--------|------|
+| 日志保留天数 | 30 | 超期日志自动清理 |
+| 会话时长 | 12 小时 | 管理员 session TTL |
+| 站点模式 | personal | personal / service / shared |
 
-- 管理台接口（`/api/*`）：
-  - 管理员登录后获取会话 token，推荐使用 `Authorization: Bearer {token}`
-  - 也支持 `x-admin-token` 或 `x-api-key` 作为备选头
-- New API 兼容接口（`/api/channel`、`/api/group`、`/api/user`）：
-  - `Authorization: Bearer {管理员密码}` 或管理员登录 token
-  - 可选请求头：`New-Api-User: 1`
-- OpenAI 兼容代理（`/v1/*`）：
-  - 使用 `Authorization: Bearer {API Token}`（或 `x-api-key`）
-  - API Token 由 `/api/tokens` 创建与管理
-- 健康检查：`GET /health` 无鉴权
+## 站点模式
 
-### 管理台接口（/api/\*）
+| 特性 | Personal | Service | Shared |
+|------|----------|---------|--------|
+| 用户注册 | 禁用 | 开放 | 开放 |
+| 公开模型列表 | 禁用 (403) | 显示全部（含定价） | 仅共享模型（隐藏定价和渠道名） |
+| 用户令牌 | 禁用 (402) | 按余额扣费 | 按余额扣费，仅可用共享模型 |
+| 渠道贡献 | 不可用 | 不可用 | 用户可贡献渠道 |
+| 适用场景 | 个人使用 | 团队/商业化 | 社区共享 |
 
-- `POST /api/auth/login` 管理员登录
-- `POST /api/auth/logout` 管理员登出
-- `GET /api/channels` 渠道列表
-- `POST /api/channels` 新增渠道
-- `PATCH /api/channels/:id` 更新渠道
-- `DELETE /api/channels/:id` 删除渠道
-- `POST /api/channels/:id/test` 渠道连通性测试并刷新模型
-- `GET /api/models` 汇总所有渠道模型
-- `GET /api/tokens` 令牌列表
-- `POST /api/tokens` 新建令牌（返回明文 token）
-- `PATCH /api/tokens/:id` 更新令牌（配额/状态/允许渠道等）
-- `GET /api/tokens/:id/reveal` 查看令牌明文
-- `DELETE /api/tokens/:id` 删除令牌
-- `GET /api/usage` 使用日志（支持 `from/to/model/channel_id/token_id/limit`）
-- `GET /api/dashboard` 面板聚合指标（支持 `from/to`）
-- `GET /api/settings` 读取系统设置
-- `PUT /api/settings` 更新系统设置（日志保留/会话时长/管理员密码）
+## 渠道格式
 
-### New API 兼容接口（/api/channel /api/group /api/user）
+| 格式 | 说明 |
+|------|------|
+| `openai` | 标准 OpenAI 兼容 API，请求直接转发 |
+| `anthropic` | Anthropic Messages API，自动进行 OpenAI ↔ Anthropic 格式互转 |
+| `custom` | 自定义 API，`base_url` 作为完整地址，支持自定义请求头 |
 
-渠道管理（`/api/channel`）：
+### 多 API Key
 
-- `GET /api/channel` 渠道列表（支持分页与筛选）
-- `GET /api/channel/search` 渠道搜索（keyword/group/model/status/type）
-- `GET /api/channel/:id` 渠道详情
-- `POST /api/channel` 新增渠道（单条）
-- `PUT /api/channel` 更新渠道
-- `DELETE /api/channel/:id` 删除渠道
-- `GET /api/channel/test/:id` 渠道连通性测试
-- `POST /api/channel/test` 渠道连通性测试（body 传 id）
-- `GET /api/channel/fetch_models/:id` 拉取渠道模型
-- `POST /api/channel/fetch_models` 拉取模型（body 传 base_url/key）
-- `GET /api/channel/models` 模型列表
-- `GET /api/channel/models_enabled` 启用模型列表
-- `PUT /api/channel/tag` 批量更新 tag 权重/优先级
-- `POST /api/channel/tag/enabled` 批量启用 tag
-- `POST /api/channel/tag/disabled` 批量停用 tag
+每个渠道支持配置多个 API Key，在管理后台文本框中每行填写一个 Key。请求时随机打乱 Key 顺序，第一个 Key 失败（可重试状态码）则自动尝试下一个 Key，所有 Key 失败后才换下一个渠道。连通性测试使用第一个 Key。单个 Key 的渠道行为不变。
 
-分组与用户（只读）：
+### 模型启用/禁用
 
-- `GET /api/group` 渠道分组列表
-- `GET /api/user/models` 用户可用模型列表
+渠道的模型列表支持单独启用或禁用某个模型。在模型定价编辑区域点击模型前的「启用/禁用」按钮即可切换。禁用的模型：
+- 不出现在 `/v1/models` 接口返回中
+- 不参与代理路由匹配（请求该模型时不会路由到此渠道）
+- 配置（定价、共享状态）保留不丢失，随时可恢复启用
 
-### OpenAI 兼容代理（/v1/\*）
+## 管理后台
 
-- `ALL /v1/*` 转发到渠道 `base_url + 请求路径`
-- 当请求路径为 `/v1/responses` 且上游 400/404 时自动回退到 `/responses`
-- 流式请求会自动补齐 `stream_options.include_usage = true` 以收集用量
+| 标签页 | 功能 |
+|--------|------|
+| 数据面板 | 请求量、Token 消耗、错误率、按日/模型/渠道/令牌维度统计 |
+| 可用性监测 | 渠道健康状态、成功率、延迟、日趋势（支持 15m/1h/1d/7d/30d） |
+| 渠道管理 | 渠道 CRUD、连通性测试、模型自动拉取、多 API Key、模型启用/禁用 |
+| 模型广场 | 汇总各渠道模型、定价、用量、延迟 |
+| 令牌管理 | API Token CRUD、配额管理、渠道限制 |
+| 使用日志 | 详细请求日志，支持按时间/模型/渠道/令牌筛选 |
+| 系统设置 | 日志保留、会话时长、站点模式、管理员密码 |
+| 用户管理 | 用户 CRUD、余额管理、状态控制 |
+| 对话测试 | 内置 Playground，选择模型直接流式对话测试 |
 
+## 用户端
+
+| 页面 | 功能 |
+|------|------|
+| 仪表盘 | 余额、请求量、费用、近期趋势 |
+| 模型广场 | 可用模型与定价 |
+| 我的令牌 | 创建/管理个人 API Token |
+| 使用日志 | 个人请求记录 |
+| 贡献渠道 | 贡献 AI 渠道（仅共享模式） |
+
+## API 参考
+
+### 鉴权方式
+
+| 接口组 | 鉴权方式 |
+|--------|----------|
+| `/api/*` 管理接口 | `Authorization: Bearer {session_token}`（也支持 `x-admin-token`、`x-api-key`） |
+| `/api/channel`、`/api/group`、`/api/user` | `Authorization: Bearer {管理员密码}`（兼容 New API，支持 `New-Api-User` 头） |
+| `/v1/*` OpenAI 代理 | `Authorization: Bearer {api_token}` |
+| `/anthropic/v1/*` Anthropic 代理 | `Authorization: Bearer {api_token}` |
+| `/api/u/*` 用户接口 | `Authorization: Bearer {user_session_token}` |
+| `GET /health` | 无需鉴权 |
+
+### 管理接口 (`/api/*`)
+
+**认证**
+- `POST /api/auth/login` — 管理员登录
+- `POST /api/auth/logout` — 管理员登出
+
+**渠道**
+- `GET /api/channels` — 渠道列表
+- `POST /api/channels` — 新增渠道
+- `PATCH /api/channels/:id` — 更新渠道
+- `DELETE /api/channels/:id` — 删除渠道
+- `POST /api/channels/:id/test` — 连通性测试（自动刷新模型列表）
+
+**模型**
+- `GET /api/models` — 汇总所有渠道模型（含定价、用量、延迟统计）
+
+**令牌**
+- `GET /api/tokens` — 令牌列表
+- `POST /api/tokens` — 新建令牌（返回一次性明文 token）
+- `PATCH /api/tokens/:id` — 更新令牌（配额/状态/允许渠道）
+- `GET /api/tokens/:id/reveal` — 查看令牌明文
+- `DELETE /api/tokens/:id` — 删除令牌
+
+**用量**
+- `GET /api/usage` — 使用日志（支持 `from/to/model/channel_id/token_id/limit`）
+
+**面板**
+- `GET /api/dashboard` — 聚合指标（支持 `from/to`）
+
+**监测**
+- `GET /api/monitoring` — 渠道健康数据（支持 `range`: 15m/1h/1d/7d/30d）
+
+**设置**
+- `GET /api/settings` — 读取系统设置
+- `PUT /api/settings` — 更新系统设置
+
+**用户管理**
+- `GET /api/users` — 用户列表
+- `POST /api/users` — 创建用户
+- `PATCH /api/users/:id` — 更新用户
+- `DELETE /api/users/:id` — 删除用户
+
+**对话测试**
+- `GET /api/playground/models` — 可用模型列表
+- `POST /api/playground/chat` — 对话测试（不记录用量，不扣费）
+
+### New API 兼容接口
+
+**渠道管理 (`/api/channel`)**
+- `GET /api/channel` — 渠道列表（分页：`page/page_size/limit/p`）
+- `GET /api/channel/search` — 渠道搜索（`keyword/group/model/status/type`）
+- `GET /api/channel/:id` — 渠道详情
+- `POST /api/channel` — 新增渠道
+- `PUT /api/channel` — 更新渠道
+- `DELETE /api/channel/:id` — 删除渠道
+- `GET /api/channel/test/:id` — 连通性测试
+- `POST /api/channel/test` — 连通性测试（body 传 id）
+- `GET /api/channel/fetch_models/:id` — 拉取渠道模型
+- `POST /api/channel/fetch_models` — 拉取模型（body 传 base_url/key）
+- `GET /api/channel/models` — 模型列表
+- `GET /api/channel/models_enabled` — 启用模型列表
+- `PUT /api/channel/tag` — 批量更新 tag 权重/优先级
+- `POST /api/channel/tag/enabled` — 批量启用 tag
+- `POST /api/channel/tag/disabled` — 批量停用 tag
+
+**分组与用户**
+- `GET /api/group` — 渠道分组列表
+- `GET /api/user/models` — 用户可用模型列表
+
+### 公开接口 (`/api/public`)
+
+- `GET /api/public/site-info` — 站点模式信息
+- `GET /api/public/models` — 公开模型列表（受站点模式控制）
+
+### 用户接口 (`/api/u/*`)
+
+**认证**
+- `POST /api/u/auth/register` — 用户注册（personal 模式禁用）
+- `POST /api/u/auth/login` — 用户登录
+- `POST /api/u/auth/logout` — 用户登出
+- `GET /api/u/auth/me` — 当前用户信息
+
+**数据**
+- `GET /api/u/dashboard` — 用户仪表盘（余额、用量、趋势）
+- `GET /api/u/models` — 可用模型列表
+- `GET /api/u/tokens` — 用户令牌列表
+- `POST /api/u/tokens` — 创建令牌
+- `DELETE /api/u/tokens/:id` — 删除令牌
+- `GET /api/u/tokens/:id/reveal` — 查看令牌明文
+- `GET /api/u/usage` — 用户使用日志
+
+**渠道贡献（仅共享模式）**
+- `GET /api/u/channels` — 我贡献的渠道
+- `POST /api/u/channels` — 贡献渠道
+- `DELETE /api/u/channels/:id` — 删除贡献渠道
+
+### OpenAI 兼容代理 (`/v1/*`)
+
+- `GET /v1/models` — 可用模型列表
+- `POST /v1/chat/completions` — 对话补全
+- `POST /v1/responses` — 响应接口
+- `ALL /v1/*` — 其他请求透传
+
+代理特性：
+- 按权重随机选择渠道，支持多轮重试
+- 单渠道多 API Key 支持，失败自动换 Key 重试，所有 Key 失败后才换渠道
+- 禁用的模型不参与路由匹配，不出现在模型列表中
+- 流式请求自动注入 `stream_options.include_usage = true`
+- `/v1/chat/completions` 返回 400/404 时自动回退到 `/v1/responses`
+- 自动记录 token 用量和费用
+
+### Anthropic 兼容代理 (`/anthropic/v1/*`)
+
+- `POST /anthropic/v1/messages` — Anthropic Messages API
+
+接受 Anthropic 格式请求，自动路由到配置的渠道并转换格式。
+
+## 数据库
+
+使用 Cloudflare D1 (SQLite)，包含以下表：
+
+| 表 | 说明 |
+|----|------|
+| `channels` | 渠道配置（base_url、api_key、权重、模型列表、格式等） |
+| `tokens` | API 令牌（hash 存储、配额、允许渠道） |
+| `usage_logs` | 请求日志（模型、token 数、费用、延迟） |
+| `settings` | 系统键值设置 |
+| `admin_sessions` | 管理员会话 |
+| `users` | 用户账号 |
+| `user_sessions` | 用户会话 |
+
+迁移文件位于 `apps/worker/migrations/`。
+
+## GitHub Actions 自动部署
+
+工作流：`Deploy SPA CF Workers[Worker一体化部署]`
+
+### 配置 Secrets
+
+在仓库 Settings → Secrets and variables → Actions 中添加：
+
+- `CLOUDFLARE_API_TOKEN` — 需包含 Workers + D1 读写权限
+- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare 账户 ID
+
+### 可选变量
+
+- `SPA_DEPLOY` — 自动部署开关（`true`/`false`），未设置时默认启用
+
+### 触发方式
+
+| 方式 | 条件 | 受 `SPA_DEPLOY` 控制 |
+|------|------|----------------------|
+| Push | `main`/`master` 分支，变更涉及 `apps/ui/**` 或 `apps/worker/**` | 是 |
+| 手动 | Actions 页面 → Run workflow | 否（除非 `from_panel=true`） |
+| 外部 | `repository_dispatch` (type: `deploy-spa-button`) | 否 |
+
+### 手动触发参数
+
+| 参数 | 选项 | 默认 | 说明 |
+|------|------|------|------|
+| `deploy_action` | `update` / `init` | `update` | `init` 用于首次部署（创建 D1 + 迁移 + 部署） |
+| `deploy_target` | `frontend` / `backend` / `both` / `auto` | `auto` | `auto` 按变更范围决定 |
+| `apply_migrations` | `true` / `false` / `auto` | `auto` | `auto` 仅在迁移文件变更时执行 |
+| `from_panel` | `true` / `false` | `auto` | 是否由控制面板触发 |
+
+### 部署流程
+
+1. 检出代码 → 安装 Bun 1.3.9 → `bun install`
+2. 构建管理台（`apps/ui/dist`）并校验产物
+3. 创建/校验 D1 数据库（`api-worker`），写入 `database_id`
+4. 按需执行远程数据库迁移
+5. `wrangler deploy` 部署 Worker（含静态资源）
+
+## 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 后端运行时 | Cloudflare Workers |
+| 后端框架 | Hono |
+| 数据库 | Cloudflare D1 (SQLite) |
+| 前端框架 | Hono JSX + Vite |
+| 样式 | Tailwind CSS |
+| 包管理 | Bun 1.3.9 |
+| 代码规范 | Biome |
+| 测试 | Vitest |
+| CI/CD | GitHub Actions |
+| 语言 | TypeScript |

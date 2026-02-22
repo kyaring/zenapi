@@ -36,6 +36,7 @@ import { SettingsView } from "./features/SettingsView";
 import { TokensView } from "./features/TokensView";
 import { UsageView } from "./features/UsageView";
 import { UsersView } from "./features/UsersView";
+import { PlaygroundView } from "./features/PlaygroundView";
 
 type AdminAppProps = {
 	token: string;
@@ -56,6 +57,7 @@ const adminTabToPath: Record<TabId, string> = {
 	usage: "/admin/usage",
 	settings: "/admin/settings",
 	users: "/admin/users",
+	playground: "/admin/playground",
 };
 
 const adminPathToTab: Record<string, TabId> = {
@@ -67,6 +69,7 @@ const adminPathToTab: Record<string, TabId> = {
 	"/admin/usage": "usage",
 	"/admin/settings": "settings",
 	"/admin/users": "users",
+	"/admin/playground": "playground",
 };
 
 export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
@@ -154,6 +157,7 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 				if (tabId === "usage") await loadUsage();
 				if (tabId === "settings") await loadSettings();
 				if (tabId === "users") await loadUsers();
+				if (tabId === "playground") { /* no data to preload */ }
 			} catch (error) {
 				setNotice((error as Error).message);
 			} finally {
@@ -342,6 +346,7 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 							input_price?: number;
 							output_price?: number;
 							shared?: boolean;
+							enabled?: boolean;
 						} = { id };
 						if (parts.length > 1 && parts[1].trim()) {
 							entry.input_price = Number(parts[1].trim());
@@ -351,6 +356,9 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 						}
 						if (parts.length > 3) {
 							entry.shared = parts[3].trim() === "1";
+						}
+						if (parts.length > 4) {
+							entry.enabled = parts[4].trim() !== "0";
 						}
 						return entry;
 					});
@@ -744,6 +752,9 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 					onDelete={handleUserDelete}
 				/>
 			);
+		}
+		if (activeTab === "playground") {
+			return <PlaygroundView token={token} />;
 		}
 		return (
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">

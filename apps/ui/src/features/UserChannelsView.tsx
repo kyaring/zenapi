@@ -240,17 +240,18 @@ export const UserChannelsView = ({
 								<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
 									API Key
 								</label>
-								<input
-									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-									type="text"
+								<textarea
+									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200 font-mono"
+									rows={3}
 									required
+									placeholder={"每行一个 API Key"}
 									value={form.api_key}
 									onInput={(e) =>
 										setForm((prev) => ({
 											...prev,
 											api_key:
 												(
-													e.currentTarget as HTMLInputElement
+													e.currentTarget as HTMLTextAreaElement
 												)?.value ?? "",
 										}))
 									}

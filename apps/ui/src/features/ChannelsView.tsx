@@ -6,6 +6,7 @@ type ParsedModel = {
 	input_price: string;
 	output_price: string;
 	shared: boolean;
+	enabled: boolean;
 };
 
 function parseModelLines(text: string, defaultShared = false): ParsedModel[] {
@@ -16,11 +17,13 @@ function parseModelLines(text: string, defaultShared = false): ParsedModel[] {
 		.map((line) => {
 			const parts = line.split("|");
 			const hasExplicitShared = parts.length > 3 && parts[3].trim() !== "";
+			const hasExplicitEnabled = parts.length > 4 && parts[4].trim() !== "";
 			return {
 				id: parts[0].trim(),
 				input_price: parts[1]?.trim() ?? "",
 				output_price: parts[2]?.trim() ?? "",
 				shared: hasExplicitShared ? parts[3].trim() === "1" : defaultShared,
+				enabled: hasExplicitEnabled ? parts[4].trim() !== "0" : true,
 			};
 		});
 }
@@ -28,8 +31,8 @@ function parseModelLines(text: string, defaultShared = false): ParsedModel[] {
 function rebuildModelsText(models: ParsedModel[]): string {
 	return models
 		.map((m) => {
-			if (m.input_price || m.output_price || m.shared === true || m.shared === false) {
-				return `${m.id}|${m.input_price}|${m.output_price}|${m.shared ? "1" : "0"}`;
+			if (m.input_price || m.output_price || m.shared === true || m.shared === false || m.enabled === false) {
+				return `${m.id}|${m.input_price}|${m.output_price}|${m.shared ? "1" : "0"}|${m.enabled ? "1" : "0"}`;
 			}
 			return m.id;
 		})
@@ -55,6 +58,10 @@ const ModelPricingEditor = ({
 	const allShared = sharedCount === parsed.length;
 	const noneShared = sharedCount === 0;
 
+	const enabledCount = parsed.filter((m) => m.enabled).length;
+	const allEnabled = enabledCount === parsed.length;
+	const noneEnabled = enabledCount === 0;
+
 	const updatePrice = (
 		index: number,
 		field: "input_price" | "output_price",
@@ -71,18 +78,57 @@ const ModelPricingEditor = ({
 		onModelsChange(rebuildModelsText(updated));
 	};
 
+	const updateEnabled = (index: number, value: boolean) => {
+		const updated = [...parsed];
+		updated[index] = { ...updated[index], enabled: value };
+		onModelsChange(rebuildModelsText(updated));
+	};
+
 	const toggleAll = (value: boolean) => {
 		const updated = parsed.map((m) => ({ ...m, shared: value }));
 		onModelsChange(rebuildModelsText(updated));
 	};
 
+	const toggleAllEnabled = (value: boolean) => {
+		const updated = parsed.map((m) => ({ ...m, enabled: value }));
+		onModelsChange(rebuildModelsText(updated));
+	};
+
 	return (
 		<div class="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
-			<div class="mb-2 flex items-center justify-between">
+			<div class="mb-2 flex items-center justify-between flex-wrap gap-2">
 				<p class="text-xs font-medium uppercase tracking-widest text-stone-400">
 					模型定价 & 共享设置
 				</p>
-				<div class="flex items-center gap-1.5">
+				<div class="flex items-center gap-1.5 flex-wrap">
+					<span class="text-xs text-stone-400">
+						{enabledCount}/{parsed.length} 启用
+					</span>
+					<button
+						type="button"
+						class={`rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors ${
+							allEnabled
+								? "bg-stone-200 text-stone-500"
+								: "bg-blue-100 text-blue-700 hover:bg-blue-200"
+						}`}
+						onClick={() => toggleAllEnabled(true)}
+						disabled={allEnabled}
+					>
+						全部启用
+					</button>
+					<button
+						type="button"
+						class={`rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors ${
+							noneEnabled
+								? "bg-stone-200 text-stone-500"
+								: "bg-stone-100 text-stone-600 hover:bg-stone-200"
+						}`}
+						onClick={() => toggleAllEnabled(false)}
+						disabled={noneEnabled}
+					>
+						全部禁用
+					</button>
+					<span class="text-xs text-stone-300">|</span>
 					<span class="text-xs text-stone-400">
 						{sharedCount}/{parsed.length} 共享
 					</span>
@@ -116,9 +162,20 @@ const ModelPricingEditor = ({
 				{parsed.map((m, i) => (
 					<div
 						key={`${m.id}-${i}`}
-						class="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
+						class={`flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 ${!m.enabled ? "opacity-50" : ""}`}
 					>
 						<div class="flex min-w-0 flex-1 items-center gap-2">
+							<button
+								type="button"
+								class={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors ${
+									m.enabled
+										? "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+										: "border-stone-200 bg-white text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+								}`}
+								onClick={() => updateEnabled(i, !m.enabled)}
+							>
+								{m.enabled ? "启用" : "禁用"}
+							</button>
 							<button
 								type="button"
 								class={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors ${
@@ -130,7 +187,7 @@ const ModelPricingEditor = ({
 							>
 								{m.shared ? "共享" : "私有"}
 							</button>
-							<span class="min-w-0 truncate text-xs font-medium text-stone-700">
+							<span class={`min-w-0 truncate text-xs font-medium ${m.enabled ? "text-stone-700" : "text-stone-400 line-through"}`}>
 								{m.id}
 							</span>
 						</div>
@@ -614,15 +671,17 @@ export const ChannelsView = ({
 								>
 									API Key
 								</label>
-								<input
-									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+								<textarea
+									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200 font-mono"
 									id="channel-key"
 									name="api_key"
+									rows={3}
+									placeholder={"每行一个 API Key"}
 									value={channelForm.api_key}
 									required
 									onInput={(event) =>
 										onFormChange({
-											api_key: (event.currentTarget as HTMLInputElement).value,
+											api_key: (event.currentTarget as HTMLTextAreaElement).value,
 										})
 									}
 								/>
@@ -639,7 +698,8 @@ export const ChannelsView = ({
 									id="channel-weight"
 									name="weight"
 									type="number"
-									min="1"
+									min="0"
+									step="any"
 									value={channelForm.weight}
 									onInput={(event) =>
 										onFormChange({

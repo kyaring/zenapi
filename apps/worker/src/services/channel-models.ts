@@ -6,6 +6,7 @@ export type ModelPricing = {
 	input_price?: number; // per million tokens, USD
 	output_price?: number; // per million tokens, USD
 	shared?: boolean; // whether this model is exposed in shared mode
+	enabled?: boolean; // undefined/true = enabled, false = disabled
 };
 
 export type ModelEntry = {
@@ -17,7 +18,7 @@ export type ModelEntry = {
 	outputPrice?: number;
 };
 
-type ModelLike = { id?: unknown; input_price?: unknown; output_price?: unknown; shared?: unknown };
+type ModelLike = { id?: unknown; input_price?: unknown; output_price?: unknown; shared?: unknown; enabled?: unknown };
 
 function toModelId(item: unknown): string {
 	if (item && typeof item === "object" && "id" in item) {
@@ -68,6 +69,7 @@ export function modelsToJson(models: string[] | ModelPricing[]): string {
 			if (m.input_price != null) entry.input_price = m.input_price;
 			if (m.output_price != null) entry.output_price = m.output_price;
 			if (m.shared != null) entry.shared = m.shared;
+			if (m.enabled != null) entry.enabled = m.enabled;
 			return entry;
 		}),
 	);
@@ -76,24 +78,15 @@ export function modelsToJson(models: string[] | ModelPricing[]): string {
 export function extractModelIds(
 	channel: Pick<ChannelRow, "models_json">,
 ): string[] {
-	const raw = safeJsonParse<ModelLike[] | { data?: ModelLike[] } | null>(
-		channel.models_json,
-		null,
-	);
-	const models = Array.isArray(raw)
-		? raw
-		: Array.isArray(raw?.data)
-			? raw.data
-			: [];
-	return models
-		.map((model) => toModelId(model))
-		.filter((model: string) => model.length > 0);
+	return extractModelPricings(channel)
+		.filter((m) => m.enabled !== false)
+		.map((m) => m.id);
 }
 
 export function extractModels(
 	channel: Pick<ChannelRow, "id" | "name" | "models_json">,
 ): ModelEntry[] {
-	const pricings = extractModelPricings(channel);
+	const pricings = extractModelPricings(channel).filter((p) => p.enabled !== false);
 	return pricings.map((p) => ({
 		id: p.id,
 		label: p.id,
@@ -125,9 +118,11 @@ export function extractModelPricings(
 				const ip = (model as ModelLike).input_price;
 				const op = (model as ModelLike).output_price;
 				const sh = (model as ModelLike).shared;
+				const en = (model as ModelLike).enabled;
 				if (ip != null && Number(ip) > 0) entry.input_price = Number(ip);
 				if (op != null && Number(op) > 0) entry.output_price = Number(op);
 				if (sh != null) entry.shared = Boolean(sh);
+				if (en != null) entry.enabled = Boolean(en);
 			}
 			return entry;
 		})
@@ -137,7 +132,7 @@ export function extractModelPricings(
 export function extractSharedModelPricings(
 	channel: Pick<ChannelRow, "models_json">,
 ): ModelPricing[] {
-	return extractModelPricings(channel).filter((m) => m.shared !== false);
+	return extractModelPricings(channel).filter((m) => m.shared !== false && m.enabled !== false);
 }
 
 export function extractSharedModels(

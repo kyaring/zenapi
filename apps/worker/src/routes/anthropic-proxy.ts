@@ -13,6 +13,7 @@ import { calculateCost, getModelPrice } from "../services/pricing";
 import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
+import { parseApiKeys, shuffleArray } from "../utils/keys";
 import { isRetryableStatus, sleep } from "../utils/retry";
 import { normalizeBaseUrl } from "../utils/url";
 import {
@@ -108,117 +109,130 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 		for (const channel of ordered) {
 			lastChannel = channel;
 			const apiFormat = channel.api_format ?? "openai";
+			const keys = shuffleArray(parseApiKeys(channel.api_key));
+			let channelRetryable = false;
 
-			try {
-				let response: Response;
+			for (const apiKey of keys) {
+				try {
+					let response: Response;
 
-				if (apiFormat === "anthropic") {
-					// Pass-through: send original Anthropic body directly
-					const baseUrl = normalizeBaseUrl(channel.base_url);
-					const target = `${baseUrl}/v1/messages`;
-					const headers = new Headers();
-					headers.set("x-api-key", String(channel.api_key));
-					headers.set(
-						"anthropic-version",
-						c.req.header("anthropic-version") ?? "2023-06-01",
-					);
-					headers.set("content-type", "application/json");
-
-					response = await fetch(target, {
-						method: "POST",
-						headers,
-						body: effectiveRequestText,
-					});
-
-					if (response.ok) {
-						selectedChannel = channel;
-						lastResponse = response;
-						break;
-					}
-				} else if (apiFormat === "openai") {
-					// Convert Anthropic -> OpenAI, send to OpenAI upstream
-					const baseUrl = channel.base_url.replace(/\/+$/, "");
-					const target = `${baseUrl}/chat/completions`;
-					const headers = new Headers();
-					headers.set("Authorization", `Bearer ${channel.api_key}`);
-					headers.set("content-type", "application/json");
-
-					const bodyToSend = openaiBody
-						? JSON.stringify(openaiBody)
-						: effectiveRequestText;
-
-					response = await fetch(target, {
-						method: "POST",
-						headers,
-						body: bodyToSend,
-					});
-
-					if (response.ok) {
-						selectedChannel = channel;
-						// Convert OpenAI response back to Anthropic format
-						if (isStream && response.body) {
-							const transform = createOpenaiToAnthropicStreamTransform(
-								effectiveModel ?? "",
-							);
-							const transformed = response.body.pipeThrough(transform);
-							lastResponse = new Response(transformed, {
-								status: 200,
-								headers: {
-									"content-type": "text/event-stream",
-									"cache-control": "no-cache",
-									connection: "keep-alive",
-								},
-							});
-						} else {
-							const openaiData = (await response.json()) as Record<
-								string,
-								unknown
-							>;
-							const anthropicData = openaiToAnthropicResponse(openaiData);
-							lastResponse = new Response(JSON.stringify(anthropicData), {
-								status: 200,
-								headers: { "content-type": "application/json" },
-							});
-						}
-						break;
-					}
-				} else {
-					// custom: forward as-is
-					const target = channel.base_url;
-					const headers = new Headers();
-					headers.set("Authorization", `Bearer ${channel.api_key}`);
-					headers.set("x-api-key", String(channel.api_key));
-					headers.set("content-type", "application/json");
-
-					if (channel.custom_headers_json) {
-						const customHeaders = safeJsonParse<Record<string, string>>(
-							channel.custom_headers_json,
-							{},
+					if (apiFormat === "anthropic") {
+						// Pass-through: send original Anthropic body directly
+						const baseUrl = normalizeBaseUrl(channel.base_url);
+						const target = `${baseUrl}/v1/messages`;
+						const headers = new Headers();
+						headers.set("x-api-key", String(apiKey));
+						headers.set(
+							"anthropic-version",
+							c.req.header("anthropic-version") ?? "2023-06-01",
 						);
-						for (const [key, value] of Object.entries(customHeaders)) {
-							headers.set(key, value);
+						headers.set("content-type", "application/json");
+
+						response = await fetch(target, {
+							method: "POST",
+							headers,
+							body: effectiveRequestText,
+						});
+
+						if (response.ok) {
+							selectedChannel = channel;
+							lastResponse = response;
+							break;
+						}
+					} else if (apiFormat === "openai") {
+						// Convert Anthropic -> OpenAI, send to OpenAI upstream
+						const baseUrl = channel.base_url.replace(/\/+$/, "");
+						const target = `${baseUrl}/chat/completions`;
+						const headers = new Headers();
+						headers.set("Authorization", `Bearer ${apiKey}`);
+						headers.set("content-type", "application/json");
+
+						const bodyToSend = openaiBody
+							? JSON.stringify(openaiBody)
+							: effectiveRequestText;
+
+						response = await fetch(target, {
+							method: "POST",
+							headers,
+							body: bodyToSend,
+						});
+
+						if (response.ok) {
+							selectedChannel = channel;
+							// Convert OpenAI response back to Anthropic format
+							if (isStream && response.body) {
+								const transform = createOpenaiToAnthropicStreamTransform(
+									effectiveModel ?? "",
+								);
+								const transformed = response.body.pipeThrough(transform);
+								lastResponse = new Response(transformed, {
+									status: 200,
+									headers: {
+										"content-type": "text/event-stream",
+										"cache-control": "no-cache",
+										connection: "keep-alive",
+									},
+								});
+							} else {
+								const openaiData = (await response.json()) as Record<
+									string,
+									unknown
+								>;
+								const anthropicData = openaiToAnthropicResponse(openaiData);
+								lastResponse = new Response(JSON.stringify(anthropicData), {
+									status: 200,
+									headers: { "content-type": "application/json" },
+								});
+							}
+							break;
+						}
+					} else {
+						// custom: forward as-is
+						const target = channel.base_url;
+						const headers = new Headers();
+						headers.set("Authorization", `Bearer ${apiKey}`);
+						headers.set("x-api-key", String(apiKey));
+						headers.set("content-type", "application/json");
+
+						if (channel.custom_headers_json) {
+							const customHeaders = safeJsonParse<Record<string, string>>(
+								channel.custom_headers_json,
+								{},
+							);
+							for (const [key, value] of Object.entries(customHeaders)) {
+								headers.set(key, value);
+							}
+						}
+
+						response = await fetch(target, {
+							method: "POST",
+							headers,
+							body: effectiveRequestText,
+						});
+
+						if (response.ok) {
+							selectedChannel = channel;
+							lastResponse = response;
+							break;
 						}
 					}
 
-					response = await fetch(target, {
-						method: "POST",
-						headers,
-						body: effectiveRequestText,
-					});
-
-					if (response.ok) {
-						selectedChannel = channel;
-						lastResponse = response;
+					lastResponse = response;
+					if (isRetryableStatus(response.status)) {
+						channelRetryable = true;
+					} else {
 						break;
 					}
+				} catch {
+					lastResponse = null;
+					channelRetryable = true;
 				}
+			}
 
-				lastResponse = response;
-				if (isRetryableStatus(response.status)) {
-					shouldRetry = true;
-				}
-			} catch {
-				lastResponse = null;
+			if (selectedChannel) {
+				break;
+			}
+			if (channelRetryable) {
 				shouldRetry = true;
 			}
 		}
