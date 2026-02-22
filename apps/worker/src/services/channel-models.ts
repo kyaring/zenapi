@@ -140,6 +140,20 @@ export function extractSharedModelPricings(
 	return extractModelPricings(channel).filter((m) => m.shared !== false);
 }
 
+export function extractSharedModels(
+	channel: Pick<ChannelRow, "id" | "name" | "models_json">,
+): ModelEntry[] {
+	const pricings = extractSharedModelPricings(channel);
+	return pricings.map((p) => ({
+		id: p.id,
+		label: p.id,
+		channelId: channel.id,
+		channelName: channel.name,
+		inputPrice: p.input_price,
+		outputPrice: p.output_price,
+	}));
+}
+
 export function collectUniqueModelIds(
 	channels: Array<Pick<ChannelRow, "models_json">>,
 ): string[] {
@@ -147,6 +161,18 @@ export function collectUniqueModelIds(
 	for (const channel of channels) {
 		for (const id of extractModelIds(channel)) {
 			models.add(id);
+		}
+	}
+	return Array.from(models);
+}
+
+export function collectUniqueSharedModelIds(
+	channels: Array<Pick<ChannelRow, "models_json">>,
+): string[] {
+	const models = new Set<string>();
+	for (const channel of channels) {
+		for (const p of extractSharedModelPricings(channel)) {
+			models.add(p.id);
 		}
 	}
 	return Array.from(models);

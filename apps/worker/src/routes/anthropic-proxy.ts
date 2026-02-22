@@ -10,6 +10,7 @@ import {
 } from "../services/format-converter";
 import { recordUsage } from "../services/usage";
 import { calculateCost, getModelPrice } from "../services/pricing";
+import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { isRetryableStatus, sleep } from "../utils/retry";
@@ -20,7 +21,7 @@ import {
 	parseUsageFromHeaders,
 	parseUsageFromSse,
 } from "../utils/usage";
-import { channelSupportsModel, filterAllowedChannels } from "./proxy";
+import { channelSupportsModel, channelSupportsSharedModel, filterAllowedChannels } from "./proxy";
 
 const anthropicProxy = new Hono<AppEnv>();
 
@@ -54,6 +55,9 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 		.all();
 	const activeChannels = (channelResult.results ?? []) as ChannelRecord[];
 
+	const siteMode = await getSiteMode(c.env.DB);
+	const useSharedFilter = siteMode === "shared" && !!tokenRecord.user_id;
+
 	// Resolve channel/model routing syntax
 	const { targetChannel, actualModel } = resolveChannelRoute(model, activeChannels);
 	const effectiveModel = targetChannel ? actualModel : model;
@@ -70,13 +74,19 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 
 	let candidates: ChannelRecord[];
 	if (targetChannel) {
+		if (useSharedFilter && !channelSupportsSharedModel(targetChannel, actualModel)) {
+			return jsonError(c, 403, "model_not_shared", "model_not_shared");
+		}
 		candidates = [targetChannel];
 	} else {
 		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
+		const supportsFn = useSharedFilter
+			? channelSupportsSharedModel
+			: channelSupportsModel;
 		const modelChannels = allowedChannels.filter((channel) =>
-			channelSupportsModel(channel, model),
+			supportsFn(channel, model),
 		);
-		candidates = modelChannels.length > 0 ? modelChannels : allowedChannels;
+		candidates = modelChannels.length > 0 ? modelChannels : (useSharedFilter ? [] : allowedChannels);
 	}
 
 	if (candidates.length === 0) {

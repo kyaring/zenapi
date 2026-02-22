@@ -6,7 +6,11 @@ import {
 	createWeightedOrder,
 	extractModels,
 } from "../services/channels";
-import { collectUniqueModelIds } from "../services/channel-models";
+import {
+	collectUniqueModelIds,
+	collectUniqueSharedModelIds,
+	extractSharedModels,
+} from "../services/channel-models";
 import {
 	anthropicToOpenaiResponse,
 	createAnthropicToOpenaiStreamTransform,
@@ -14,6 +18,7 @@ import {
 } from "../services/format-converter";
 import { recordUsage } from "../services/usage";
 import { calculateCost, getModelPrice } from "../services/pricing";
+import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { extractReasoningEffort } from "../utils/reasoning";
@@ -41,6 +46,19 @@ export function channelSupportsModel(
 		return true;
 	}
 	const models = extractModels(channel);
+	return models.some((entry) => entry.id === model);
+}
+
+export function channelSupportsSharedModel(
+	channel: ChannelRecord,
+	model?: string | null,
+): boolean {
+	if (!model) {
+		return true;
+	}
+	const models = extractSharedModels(
+		channel as unknown as { id: string; name: string; models_json: string },
+	);
 	return models.some((entry) => entry.id === model);
 }
 
@@ -180,7 +198,13 @@ proxy.get("/models", tokenAuth, async (c) => {
 		.all();
 	const activeChannels = (channelResult.results ?? []) as ChannelRecord[];
 	const allowed = filterAllowedChannels(activeChannels, tokenRecord);
-	const modelIds = collectUniqueModelIds(allowed);
+
+	const siteMode = await getSiteMode(c.env.DB);
+	const useSharedFilter = siteMode === "shared" && !!tokenRecord.user_id;
+	const modelIds = useSharedFilter
+		? collectUniqueSharedModelIds(allowed)
+		: collectUniqueModelIds(allowed);
+
 	const now = Math.floor(Date.now() / 1000);
 	return c.json({
 		object: "list",
@@ -234,6 +258,9 @@ proxy.all("/*", tokenAuth, async (c) => {
 		.all();
 	const activeChannels = (channelResult.results ?? []) as ChannelRecord[];
 
+	const siteMode = await getSiteMode(c.env.DB);
+	const useSharedFilter = siteMode === "shared" && !!tokenRecord.user_id;
+
 	// Resolve channel/model routing syntax
 	const { targetChannel, actualModel } = resolveChannelRoute(model, activeChannels);
 	const effectiveModel = targetChannel ? actualModel : model;
@@ -246,13 +273,20 @@ proxy.all("/*", tokenAuth, async (c) => {
 
 	let candidates: ChannelRecord[];
 	if (targetChannel) {
+		// Explicit channel routing — still enforce shared filter for user tokens
+		if (useSharedFilter && !channelSupportsSharedModel(targetChannel, actualModel)) {
+			return jsonError(c, 403, "model_not_shared", "model_not_shared");
+		}
 		candidates = [targetChannel];
 	} else {
 		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
+		const supportsFn = useSharedFilter
+			? channelSupportsSharedModel
+			: channelSupportsModel;
 		const modelChannels = allowedChannels.filter((channel) =>
-			channelSupportsModel(channel, model),
+			supportsFn(channel, model),
 		);
-		candidates = modelChannels.length > 0 ? modelChannels : allowedChannels;
+		candidates = modelChannels.length > 0 ? modelChannels : (useSharedFilter ? [] : allowedChannels);
 	}
 
 	if (candidates.length === 0) {
