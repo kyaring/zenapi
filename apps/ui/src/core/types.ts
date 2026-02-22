@@ -153,7 +153,8 @@ export type TabId =
 	| "tokens"
 	| "usage"
 	| "settings"
-	| "users";
+	| "users"
+	| "playground";
 
 export type TabItem = {
 	id: TabId;

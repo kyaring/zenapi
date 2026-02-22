@@ -20,6 +20,7 @@ import tokenRoutes from "./routes/tokens";
 import userApiRoutes from "./routes/user-api";
 import userAuthRoutes from "./routes/user-auth";
 import userChannelRoutes from "./routes/user-channels";
+import playgroundRoutes from "./routes/playground";
 import usageRoutes from "./routes/usage";
 
 const app = new Hono<AppEnv>({ strict: false });
@@ -133,6 +134,7 @@ app.route("/api/public", publicRoutes);
 app.route("/api/channel", newapiChannelRoutes);
 app.route("/api/user", newapiUserRoutes);
 app.route("/api/group", newapiGroupRoutes);
+app.route("/api/playground", playgroundRoutes);
 app.route("/api/users", adminUserRoutes);
 app.route("/api/u/auth", userAuthRoutes);
 app.route("/api/u", userApiRoutes);

@@ -17,6 +17,7 @@ export const tabs: TabItem[] = [
 	{ id: "usage", label: "使用日志" },
 	{ id: "settings", label: "系统设置" },
 	{ id: "users", label: "用户管理" },
+	{ id: "playground", label: "对话测试" },
 ];
 
 export const userTabs: UserTabItem[] = [

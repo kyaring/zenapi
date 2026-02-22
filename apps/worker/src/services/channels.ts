@@ -13,7 +13,7 @@ export function createWeightedOrder(
 ): ChannelRecord[] {
 	const pool = channels.map((channel) => ({
 		...channel,
-		weight: Math.max(1, Number(channel.weight) || 1),
+		weight: Math.max(0, Number(channel.weight) || 0),
 	}));
 	const ordered: ChannelRecord[] = [];
 	while (pool.length > 0) {
