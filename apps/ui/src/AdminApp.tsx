@@ -20,6 +20,7 @@ import type {
 	MonitoringData,
 	Settings,
 	SettingsForm,
+	SiteMode,
 	TabId,
 	Token,
 	User,
@@ -147,7 +148,7 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 			try {
 				if (tabId === "dashboard") await loadDashboard();
 				if (tabId === "monitoring") await loadMonitoring();
-				if (tabId === "channels") await loadChannels();
+				if (tabId === "channels") { await loadChannels(); await loadSettings(); }
 				if (tabId === "models") await loadModels();
 				if (tabId === "tokens") await loadTokens();
 				if (tabId === "usage") await loadUsage();
@@ -281,13 +282,15 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 							id?: string;
 							input_price?: number;
 							output_price?: number;
+							shared?: boolean;
 						};
 						const id = obj?.id ?? "";
 						if (!id) return "";
 						const ip = obj?.input_price;
 						const op = obj?.output_price;
-						if (ip != null || op != null) {
-							return `${id}|${ip ?? ""}|${op ?? ""}`;
+						const sh = obj?.shared;
+						if (ip != null || op != null || sh) {
+							return `${id}|${ip ?? ""}|${op ?? ""}|${sh ? "1" : "0"}`;
 						}
 						return id;
 					})
@@ -338,12 +341,16 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 							id: string;
 							input_price?: number;
 							output_price?: number;
+							shared?: boolean;
 						} = { id };
 						if (parts.length > 1 && parts[1].trim()) {
 							entry.input_price = Number(parts[1].trim());
 						}
 						if (parts.length > 2 && parts[2].trim()) {
 							entry.output_price = Number(parts[2].trim());
+						}
+						if (parts.length > 3) {
+							entry.shared = parts[3].trim() === "1";
 						}
 						return entry;
 					});
@@ -676,6 +683,7 @@ export const AdminApp = ({ token, updateToken }: AdminAppProps) => {
 					pagedChannels={pagedChannels}
 					editingChannel={editingChannel}
 					isChannelModalOpen={isChannelModalOpen}
+					siteMode={data.settings?.site_mode ?? "personal"}
 					onCreate={openChannelCreate}
 					onCloseModal={closeChannelModal}
 					onEdit={startChannelEdit}

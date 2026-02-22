@@ -13,6 +13,7 @@ import {
 	updateChannelTestResult,
 } from "../services/channel-testing";
 import type { ChannelApiFormat } from "../services/channel-types";
+import { getSiteMode } from "../services/settings";
 import { generateToken } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
@@ -194,6 +195,8 @@ channels.post("/:id/test", async (c) => {
 		return jsonError(c, 502, "channel_unreachable", "channel_unreachable");
 	}
 
+	const siteMode = await getSiteMode(c.env.DB);
+
 	// Only overwrite models_json when the test actually returned models
 	const hasModels = result.models.length > 0;
 	const updateData: {
@@ -201,10 +204,14 @@ channels.post("/:id/test", async (c) => {
 		elapsed: number;
 		modelsJson?: string;
 		existingModelsJson?: string | null;
+		defaultShared?: boolean;
 	} = { ok: true, elapsed: result.elapsed };
 	if (hasModels && result.payload) {
 		updateData.modelsJson = JSON.stringify(result.payload);
 		updateData.existingModelsJson = channel.models_json ?? null;
+		if (siteMode === "shared") {
+			updateData.defaultShared = true;
+		}
 	}
 	await updateChannelTestResult(c.env.DB, id, updateData);
 

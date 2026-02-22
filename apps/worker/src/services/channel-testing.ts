@@ -94,6 +94,7 @@ export async function updateChannelTestResult(
 		models?: string[];
 		modelsJson?: string;
 		existingModelsJson?: string | null;
+		defaultShared?: boolean;
 	},
 ): Promise<void> {
 	const now = Math.floor(Date.now() / 1000);
@@ -106,17 +107,16 @@ export async function updateChannelTestResult(
 			const existingPricings = extractModelPricings({
 				models_json: result.existingModelsJson,
 			});
-			const priceMap = new Map<
+			const existingMap = new Map<
 				string,
-				{ input_price?: number; output_price?: number }
+				{ input_price?: number; output_price?: number; shared?: boolean }
 			>();
 			for (const p of existingPricings) {
-				if (p.input_price != null || p.output_price != null) {
-					priceMap.set(p.id, {
-						input_price: p.input_price,
-						output_price: p.output_price,
-					});
-				}
+				existingMap.set(p.id, {
+					input_price: p.input_price,
+					output_price: p.output_price,
+					shared: p.shared,
+				});
 			}
 			const newModels = safeJsonParse<Array<{ id?: string }>>(
 				result.modelsJson,
@@ -126,17 +126,38 @@ export async function updateChannelTestResult(
 				Array.isArray(newModels) ? newModels : []
 			).map((m) => {
 				const mid = typeof m === "string" ? m : String(m?.id ?? "");
-				const existing = priceMap.get(mid);
+				const existing = existingMap.get(mid);
 				const entry: ModelPricing = { id: mid };
 				if (existing?.input_price != null)
 					entry.input_price = existing.input_price;
 				if (existing?.output_price != null)
 					entry.output_price = existing.output_price;
+				// Preserve existing shared flag, or use default for new models
+				if (existing?.shared != null) {
+					entry.shared = existing.shared;
+				} else if (result.defaultShared) {
+					entry.shared = true;
+				}
 				return entry;
 			});
 			modelsJson = JSON.stringify(merged);
 		} else {
-			modelsJson = result.modelsJson;
+			// No existing models — if defaultShared, mark all as shared
+			if (result.defaultShared) {
+				const newModels = safeJsonParse<Array<{ id?: string }>>(
+					result.modelsJson,
+					[],
+				);
+				const marked: ModelPricing[] = (
+					Array.isArray(newModels) ? newModels : []
+				).map((m) => {
+					const mid = typeof m === "string" ? m : String(m?.id ?? "");
+					return { id: mid, shared: true };
+				});
+				modelsJson = JSON.stringify(marked);
+			} else {
+				modelsJson = result.modelsJson;
+			}
 		}
 	} else if (result.models) {
 		modelsJson = modelsToJson(result.models);

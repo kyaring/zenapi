@@ -1,4 +1,4 @@
-import type { Channel, ChannelApiFormat, ChannelForm } from "../core/types";
+import type { Channel, ChannelApiFormat, ChannelForm, SiteMode } from "../core/types";
 import { buildPageItems } from "../core/utils";
 
 type ParsedModel = {
@@ -8,18 +8,19 @@ type ParsedModel = {
 	shared: boolean;
 };
 
-function parseModelLines(text: string): ParsedModel[] {
+function parseModelLines(text: string, defaultShared = false): ParsedModel[] {
 	return text
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(Boolean)
 		.map((line) => {
 			const parts = line.split("|");
+			const hasExplicitShared = parts.length > 3 && parts[3].trim() !== "";
 			return {
 				id: parts[0].trim(),
 				input_price: parts[1]?.trim() ?? "",
 				output_price: parts[2]?.trim() ?? "",
-				shared: parts[3]?.trim() === "1",
+				shared: hasExplicitShared ? parts[3].trim() === "1" : defaultShared,
 			};
 		});
 }
@@ -37,15 +38,22 @@ function rebuildModelsText(models: ParsedModel[]): string {
 
 type ModelPricingEditorProps = {
 	models: string;
+	siteMode: SiteMode;
 	onModelsChange: (value: string) => void;
 };
 
 const ModelPricingEditor = ({
 	models,
+	siteMode,
 	onModelsChange,
 }: ModelPricingEditorProps) => {
-	const parsed = parseModelLines(models);
+	const defaultShared = siteMode === "shared";
+	const parsed = parseModelLines(models, defaultShared);
 	if (parsed.length === 0) return null;
+
+	const sharedCount = parsed.filter((m) => m.shared).length;
+	const allShared = sharedCount === parsed.length;
+	const noneShared = sharedCount === 0;
 
 	const updatePrice = (
 		index: number,
@@ -63,20 +71,69 @@ const ModelPricingEditor = ({
 		onModelsChange(rebuildModelsText(updated));
 	};
 
+	const toggleAll = (value: boolean) => {
+		const updated = parsed.map((m) => ({ ...m, shared: value }));
+		onModelsChange(rebuildModelsText(updated));
+	};
+
 	return (
 		<div class="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
-			<p class="mb-2 text-xs font-medium uppercase tracking-widest text-stone-400">
-				模型定价（每百万 Token，美元）
-			</p>
+			<div class="mb-2 flex items-center justify-between">
+				<p class="text-xs font-medium uppercase tracking-widest text-stone-400">
+					模型定价 & 共享设置
+				</p>
+				<div class="flex items-center gap-1.5">
+					<span class="text-xs text-stone-400">
+						{sharedCount}/{parsed.length} 共享
+					</span>
+					<button
+						type="button"
+						class={`rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors ${
+							allShared
+								? "bg-stone-200 text-stone-500"
+								: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+						}`}
+						onClick={() => toggleAll(true)}
+						disabled={allShared}
+					>
+						全部共享
+					</button>
+					<button
+						type="button"
+						class={`rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors ${
+							noneShared
+								? "bg-stone-200 text-stone-500"
+								: "bg-stone-100 text-stone-600 hover:bg-stone-200"
+						}`}
+						onClick={() => toggleAll(false)}
+						disabled={noneShared}
+					>
+						全部取消
+					</button>
+				</div>
+			</div>
 			<div class="space-y-2">
 				{parsed.map((m, i) => (
 					<div
 						key={`${m.id}-${i}`}
 						class="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
 					>
-						<span class="min-w-0 flex-1 truncate text-xs font-medium text-stone-700">
-							{m.id}
-						</span>
+						<div class="flex min-w-0 flex-1 items-center gap-2">
+							<button
+								type="button"
+								class={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors ${
+									m.shared
+										? "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+										: "border-stone-200 bg-white text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+								}`}
+								onClick={() => updateShared(i, !m.shared)}
+							>
+								{m.shared ? "共享" : "私有"}
+							</button>
+							<span class="min-w-0 truncate text-xs font-medium text-stone-700">
+								{m.id}
+							</span>
+						</div>
 						<div class="flex items-center gap-1.5">
 							<label class="text-xs text-stone-400">输入</label>
 							<input
@@ -110,20 +167,6 @@ const ModelPricingEditor = ({
 									)
 								}
 							/>
-							<label class="flex items-center gap-1 text-xs text-stone-400">
-								<input
-									type="checkbox"
-									class="h-3.5 w-3.5 rounded border-stone-300 text-amber-500 focus:ring-amber-300"
-									checked={m.shared}
-									onChange={(e) =>
-										updateShared(
-											i,
-											(e.currentTarget as HTMLInputElement).checked,
-										)
-									}
-								/>
-								共享
-							</label>
 						</div>
 					</div>
 				))}
@@ -141,6 +184,7 @@ type ChannelsViewProps = {
 	pagedChannels: Channel[];
 	editingChannel: Channel | null;
 	isChannelModalOpen: boolean;
+	siteMode: SiteMode;
 	onCreate: () => void;
 	onCloseModal: () => void;
 	onEdit: (channel: Channel) => void;
@@ -185,6 +229,7 @@ export const ChannelsView = ({
 	pagedChannels,
 	editingChannel,
 	isChannelModalOpen,
+	siteMode,
 	onCreate,
 	onCloseModal,
 	onEdit,
@@ -630,6 +675,7 @@ export const ChannelsView = ({
 								</p>
 								<ModelPricingEditor
 									models={channelForm.models}
+									siteMode={siteMode}
 									onModelsChange={(value) =>
 										onFormChange({ models: value })
 									}
