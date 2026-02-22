@@ -12,7 +12,7 @@ usage.get("/", async (c) => {
 	const query = c.req.query();
 	const params: Array<string | number> = [];
 	let sql =
-		"SELECT usage_logs.*, channels.name as channel_name, tokens.name as token_name FROM usage_logs LEFT JOIN channels ON channels.id = usage_logs.channel_id LEFT JOIN tokens ON tokens.id = usage_logs.token_id WHERE 1=1";
+		"SELECT usage_logs.*, channels.name as channel_name, tokens.name as token_name, users.name as user_name, users.email as user_email FROM usage_logs LEFT JOIN channels ON channels.id = usage_logs.channel_id LEFT JOIN tokens ON tokens.id = usage_logs.token_id LEFT JOIN users ON users.id = tokens.user_id WHERE 1=1";
 
 	if (query.from) {
 		sql += " AND usage_logs.created_at >= ?";

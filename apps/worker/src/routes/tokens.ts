@@ -23,7 +23,7 @@ type TokenRow = {
  */
 tokens.get("/", async (c) => {
 	const result = await c.env.DB.prepare(
-		"SELECT id, name, key_prefix, quota_total, quota_used, status, allowed_channels, created_at, updated_at FROM tokens ORDER BY created_at DESC",
+		"SELECT tokens.id, tokens.name, tokens.key_prefix, tokens.quota_total, tokens.quota_used, tokens.status, tokens.allowed_channels, tokens.user_id, tokens.created_at, tokens.updated_at, users.name as user_name, users.email as user_email FROM tokens LEFT JOIN users ON users.id = tokens.user_id ORDER BY tokens.created_at DESC",
 	).all();
 	return c.json({ tokens: result.results ?? [] });
 });

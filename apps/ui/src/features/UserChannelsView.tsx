@@ -215,12 +215,15 @@ export const UserChannelsView = ({
 							</div>
 							<div>
 								<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
-									Base URL
+									{form.api_format === "custom"
+										? "完整请求 URL"
+										: "Base URL（含版本路径，如 /v1）"}
 								</label>
 								<input
 									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
 									type="url"
 									required
+									placeholder={form.api_format === "anthropic" ? "https://api.anthropic.com/anthropic" : form.api_format === "custom" ? "https://example.com/v1/chat/completions" : "https://api.openai.com/v1"}
 									value={form.base_url}
 									onInput={(e) =>
 										setForm((prev) => ({

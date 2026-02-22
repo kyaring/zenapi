@@ -103,6 +103,9 @@ export const UsageView = ({ usage, onRefresh }: UsageViewProps) => {
 									令牌
 								</th>
 								<th class="sticky top-0 border-b border-stone-200 bg-stone-50 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
+									用户
+								</th>
+								<th class="sticky top-0 border-b border-stone-200 bg-stone-50 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
 									输入 Tokens
 								</th>
 								<th class="sticky top-0 border-b border-stone-200 bg-stone-50 px-3 py-2.5 text-left text-xs uppercase tracking-widest text-stone-500">
@@ -130,7 +133,7 @@ export const UsageView = ({ usage, onRefresh }: UsageViewProps) => {
 								<tr>
 									<td
 										class="px-3 py-10 text-center text-sm text-stone-500"
-										colSpan={11}
+										colSpan={12}
 									>
 										暂无日志。
 									</td>
@@ -148,10 +151,13 @@ export const UsageView = ({ usage, onRefresh }: UsageViewProps) => {
 											{log.channel_name ?? log.channel_id ?? "-"}
 										</td>
 										<td class="border-b border-stone-200 px-3 py-2.5 text-left text-sm text-stone-700">
-											{log.token_name ?? log.token_id ?? "-"}
-										</td>
-										<td class="border-b border-stone-200 px-3 py-2.5 text-left text-sm text-stone-700">
-											{formatTokens(log.prompt_tokens)}
+										{log.token_name ?? log.token_id ?? "-"}
+									</td>
+									<td class="border-b border-stone-200 px-3 py-2.5 text-left text-sm text-stone-700">
+										{log.user_name ?? "-"}
+									</td>
+									<td class="border-b border-stone-200 px-3 py-2.5 text-left text-sm text-stone-700">
+										{formatTokens(log.prompt_tokens)}
 										</td>
 										<td class="border-b border-stone-200 px-3 py-2.5 text-left text-sm text-stone-700">
 											{formatTokens(log.completion_tokens)}

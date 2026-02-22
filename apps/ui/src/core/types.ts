@@ -21,6 +21,8 @@ export type Token = {
 	quota_used: number;
 	status: string;
 	user_id?: string | null;
+	user_name?: string | null;
+	user_email?: string | null;
 	created_at?: string | null;
 	updated_at?: string | null;
 };
@@ -32,6 +34,8 @@ export type UsageLog = {
 	channel_name?: string | null;
 	token_id: string | null;
 	token_name?: string | null;
+	user_name?: string | null;
+	user_email?: string | null;
 	total_tokens: number | null;
 	prompt_tokens?: number | null;
 	completion_tokens?: number | null;

@@ -6,6 +6,7 @@ import {
 	createWeightedOrder,
 	extractModels,
 } from "../services/channels";
+import { collectUniqueModelIds } from "../services/channel-models";
 import {
 	anthropicToOpenaiResponse,
 	createAnthropicToOpenaiStreamTransform,
@@ -165,6 +166,32 @@ async function convertResponse(
 	// openai or custom: pass through as-is
 	return response;
 }
+
+/**
+ * OpenAI-compatible /models endpoint.
+ * Returns all unique models from active channels.
+ */
+proxy.get("/models", tokenAuth, async (c) => {
+	const tokenRecord = c.get("tokenRecord") as TokenRecord;
+	const channelResult = await c.env.DB.prepare(
+		"SELECT * FROM channels WHERE status = ?",
+	)
+		.bind("active")
+		.all();
+	const activeChannels = (channelResult.results ?? []) as ChannelRecord[];
+	const allowed = filterAllowedChannels(activeChannels, tokenRecord);
+	const modelIds = collectUniqueModelIds(allowed);
+	const now = Math.floor(Date.now() / 1000);
+	return c.json({
+		object: "list",
+		data: modelIds.map((id) => ({
+			id,
+			object: "model",
+			created: now,
+			owned_by: "system",
+		})),
+	});
+});
 
 /**
  * OpenAI-compatible proxy handler.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "hono/jsx/dom";
 import { createApiFetch } from "./core/api";
-import type { PublicModelItem, SiteMode } from "./core/types";
+import type { PublicModelItem, SiteMode, User } from "./core/types";
 import { UserLoginView } from "./features/UserLoginView";
 import { UserRegisterView } from "./features/UserRegisterView";
 
@@ -14,7 +14,7 @@ function formatPrice(n: number | null): string {
 	return `$${n}`;
 }
 
-const PublicModelCard = ({ model }: { model: PublicModelItem }) => (
+const PublicModelCard = ({ model, siteMode }: { model: PublicModelItem; siteMode: SiteMode }) => (
 	<div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
 		<div class="mb-2 flex items-start justify-between gap-2">
 			<h4 class="break-all font-['Space_Grotesk'] text-sm font-semibold tracking-tight text-stone-900">
@@ -24,7 +24,13 @@ const PublicModelCard = ({ model }: { model: PublicModelItem }) => (
 				{model.channels.length} 渠道
 			</span>
 		</div>
-		{model.channels.length > 0 && (
+		{siteMode === "shared" ? (
+			<div class="rounded-lg bg-stone-50 p-2.5">
+				<p class="text-xs text-stone-500">
+					共 {model.channels.length} 个共享渠道可用
+				</p>
+			</div>
+		) : model.channels.length > 0 ? (
 			<div class="rounded-lg bg-stone-50 p-2.5">
 				<p class="mb-1.5 text-xs font-medium uppercase tracking-widest text-stone-400">
 					渠道价格
@@ -53,15 +59,18 @@ const PublicModelCard = ({ model }: { model: PublicModelItem }) => (
 					))}
 				</div>
 			</div>
-		)}
+		) : null}
 	</div>
 );
 
 type PublicAppProps = {
 	onUserLogin: (token: string) => void;
+	onUserLogout: () => void;
+	userRecord: User | null;
+	onNavigate: (path: string) => void;
 };
 
-export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
+export const PublicApp = ({ onUserLogin, onUserLogout, userRecord, onNavigate }: PublicAppProps) => {
 	const [page, setPage] = useState<"home" | "login" | "register">(() => {
 		const normalized = normalizePath(window.location.pathname);
 		if (normalized === "/login") return "login";
@@ -168,12 +177,13 @@ export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
 							>
 								注册
 							</button>
-							<a
-								href="/admin"
+							<button
+								type="button"
 								class="rounded-lg px-4 py-2 text-sm text-stone-400 hover:text-stone-600"
+								onClick={() => onNavigate("/admin")}
 							>
 								管理后台
-							</a>
+							</button>
 						</div>
 					</div>
 				</nav>
@@ -206,12 +216,13 @@ export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
 							>
 								登录
 							</button>
-							<a
-								href="/admin"
+							<button
+								type="button"
 								class="rounded-lg px-4 py-2 text-sm text-stone-400 hover:text-stone-600"
+								onClick={() => onNavigate("/admin")}
 							>
 								管理后台
-							</a>
+							</button>
 						</div>
 					</div>
 				</nav>
@@ -239,8 +250,28 @@ export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
 					<h1 class="font-['Space_Grotesk'] text-lg font-semibold tracking-tight text-stone-900">
 						ZenApi
 					</h1>
-					<div class="flex gap-3">
-						{siteMode !== "personal" && (
+					<div class="flex items-center gap-3">
+						{userRecord ? (
+							<>
+								<span class="hidden sm:inline text-sm text-stone-500">
+									{userRecord.name}
+								</span>
+								<button
+									type="button"
+									class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-all hover:shadow-lg"
+									onClick={() => onNavigate("/user")}
+								>
+									用户面板
+								</button>
+								<button
+									type="button"
+									class="rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-500 hover:text-stone-900"
+									onClick={onUserLogout}
+								>
+									退出
+								</button>
+							</>
+						) : siteMode !== "personal" ? (
 							<>
 								<button
 									type="button"
@@ -257,13 +288,14 @@ export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
 									注册
 								</button>
 							</>
-						)}
-						<a
-							href="/admin"
+						) : null}
+						<button
+							type="button"
 							class="rounded-lg px-4 py-2 text-sm text-stone-400 hover:text-stone-600"
+							onClick={() => onNavigate("/admin")}
 						>
 							管理后台
-						</a>
+						</button>
 					</div>
 				</div>
 			</nav>
@@ -277,12 +309,13 @@ export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
 						<p class="text-sm text-stone-500">
 							此站点为自用模式，暂不对外开放。
 						</p>
-						<a
-							href="/admin"
+						<button
+							type="button"
 							class="mt-4 inline-block rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:shadow-lg"
+							onClick={() => onNavigate("/admin")}
 						>
 							管理后台
-						</a>
+						</button>
 					</div>
 				) : (
 					<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -316,7 +349,7 @@ export const PublicApp = ({ onUserLogin }: PublicAppProps) => {
 						) : (
 							<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
 								{filtered.map((model) => (
-									<PublicModelCard model={model} />
+									<PublicModelCard model={model} siteMode={siteMode} />
 								))}
 							</div>
 						)}

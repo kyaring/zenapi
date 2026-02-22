@@ -147,7 +147,7 @@ const formatBadgeColors: Record<ChannelApiFormat, string> = {
 
 const baseUrlPlaceholders: Record<ChannelApiFormat, string> = {
 	openai: "https://api.openai.com/v1",
-	anthropic: "https://api.anthropic.com",
+	anthropic: "https://api.anthropic.com/anthropic",
 	custom: "https://example.com/v1/chat/completions",
 };
 

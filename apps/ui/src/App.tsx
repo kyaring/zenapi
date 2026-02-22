@@ -63,8 +63,7 @@ const App = () => {
 				// If on login/register page, redirect to user panel
 				const current = normalizePath(window.location.pathname);
 				if (current === "/login" || current === "/register") {
-					history.pushState(null, "", "/user");
-					setPath("/user");
+					navigateTo("/user");
 				}
 			})
 			.catch(() => {
@@ -80,14 +79,23 @@ const App = () => {
 		return () => window.removeEventListener("popstate", handlePopState);
 	}, []);
 
+	const navigateTo = useCallback((target: string) => {
+		history.pushState(null, "", target);
+		setPath(normalizePath(target));
+	}, []);
+
 	const handleUserLogin = useCallback(
 		(token: string) => {
 			updateUserToken(token);
-			history.pushState(null, "", "/user");
-			setPath("/user");
+			navigateTo("/user");
 		},
-		[updateUserToken],
+		[updateUserToken, navigateTo],
 	);
+
+	const handleUserLogout = useCallback(() => {
+		updateUserToken(null);
+		navigateTo("/");
+	}, [updateUserToken, navigateTo]);
 
 	const handleAdminLogin = useCallback(
 		async (event: Event) => {
@@ -135,7 +143,7 @@ const App = () => {
 				setPath("/login");
 			}
 			return (
-				<PublicApp onUserLogin={handleUserLogin} />
+				<PublicApp onUserLogin={handleUserLogin} onUserLogout={handleUserLogout} userRecord={userRecord} onNavigate={navigateTo} />
 			);
 		}
 		return (
@@ -144,13 +152,14 @@ const App = () => {
 					token={userToken}
 					user={userRecord}
 					updateToken={updateUserToken}
+					onNavigate={navigateTo}
 				/>
 			</div>
 		);
 	}
 
 	// Public routes (/, /login, /register)
-	return <PublicApp onUserLogin={handleUserLogin} />;
+	return <PublicApp onUserLogin={handleUserLogin} onUserLogout={handleUserLogout} userRecord={userRecord} onNavigate={navigateTo} />;
 };
 
 render(<App />, root);

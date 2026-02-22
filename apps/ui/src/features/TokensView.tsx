@@ -65,8 +65,9 @@ export const TokensView = ({
 
 				{/* Desktop table */}
 				<div class="mt-4 hidden md:block overflow-hidden rounded-xl border border-stone-200">
-					<div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1.2fr)] gap-3 bg-stone-50 px-4 py-3 text-xs uppercase tracking-widest text-stone-500">
+					<div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1.2fr)] gap-3 bg-stone-50 px-4 py-3 text-xs uppercase tracking-widest text-stone-500">
 						<div>名称</div>
+						<div>归属用户</div>
 						<div>状态</div>
 						<div>已用/额度</div>
 						<div>前缀</div>
@@ -83,13 +84,22 @@ export const TokensView = ({
 								const isActive = tokenItem.status === "active";
 								return (
 									<div
-										class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-3 px-4 py-4 text-sm"
+										class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-3 px-4 py-4 text-sm"
 										key={tokenItem.id}
 									>
 										<div class="flex min-w-0 flex-col">
 											<span class="truncate font-semibold text-stone-900">
 												{tokenItem.name}
 											</span>
+										</div>
+										<div class="min-w-0">
+											{tokenItem.user_name ? (
+												<span class="truncate block text-sm text-stone-700" title={tokenItem.user_email ?? ""}>
+													{tokenItem.user_name}
+												</span>
+											) : (
+												<span class="text-sm text-stone-400">-</span>
+											)}
 										</div>
 										<div>
 											<span
@@ -175,6 +185,14 @@ export const TokensView = ({
 										</span>
 									</div>
 									<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
+										{tokenItem.user_name && (
+											<span>
+												用户:{" "}
+												<span class="font-semibold text-stone-700">
+													{tokenItem.user_name}
+												</span>
+											</span>
+										)}
 										<span>
 											额度:{" "}
 											<span class="font-semibold text-stone-700">

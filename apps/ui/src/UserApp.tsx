@@ -20,6 +20,7 @@ type UserAppProps = {
 	token: string;
 	user: User;
 	updateToken: (next: string | null) => void;
+	onNavigate: (path: string) => void;
 };
 
 const normalizePath = (path: string) => {
@@ -43,7 +44,7 @@ const userPathToTab: Record<string, UserTabId> = {
 	"/user/channels": "channels",
 };
 
-export const UserApp = ({ token, user, updateToken }: UserAppProps) => {
+export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) => {
 	const [activeTab, setActiveTab] = useState<UserTabId>(() => {
 		const normalized = normalizePath(window.location.pathname);
 		return userPathToTab[normalized] ?? "dashboard";
@@ -62,6 +63,16 @@ export const UserApp = ({ token, user, updateToken }: UserAppProps) => {
 		() => createApiFetch(token, () => updateToken(null)),
 		[token, updateToken],
 	);
+
+	// Load site mode eagerly on mount so conditional tabs (e.g. channels) appear immediately
+	useEffect(() => {
+		apiFetch<{ models: PublicModelItem[]; site_mode: SiteMode }>("/api/u/models")
+			.then((result) => {
+				setSiteMode(result.site_mode);
+				setModels(result.models);
+			})
+			.catch(() => {});
+	}, [apiFetch]);
 
 	const loadDashboard = useCallback(async () => {
 		const data = await apiFetch<UserDashboardData>("/api/u/dashboard");
@@ -359,12 +370,13 @@ export const UserApp = ({ token, user, updateToken }: UserAppProps) => {
 					))}
 				</nav>
 				<div class="mt-8 border-t border-stone-200 pt-4">
-					<a
-						href="/admin"
-						class="mb-3 block text-center text-xs text-stone-400 hover:text-stone-600"
+					<button
+						type="button"
+						class="mb-3 block w-full text-center text-xs text-stone-400 hover:text-stone-600"
+						onClick={() => onNavigate("/admin")}
 					>
 						管理后台
-					</a>
+					</button>
 					<button
 						class="h-11 w-full rounded-lg border border-stone-200 bg-transparent px-4 py-2.5 text-sm font-semibold text-stone-500 transition-all hover:text-stone-900"
 						type="button"
