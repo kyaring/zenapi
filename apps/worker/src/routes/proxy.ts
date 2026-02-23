@@ -410,6 +410,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 	let lastRequestPath = targetPath;
 	const start = Date.now();
 	let selectedChannel: ChannelRecord | null = null;
+	let selectedModelName: string | null = effectiveModel;
 
 	let round = 0;
 	while (round < retryRounds && !selectedChannel) {
@@ -423,8 +424,9 @@ proxy.all("/*", tokenAuth, async (c) => {
 			// and prepare a channel-specific request body if needed
 			let channelRequestText = requestText;
 			let channelParsedBody = parsedBody;
+			let channelModelName = effectiveModel;
 			if (!targetChannel && resolvedNames.length > 1 && parsedBody) {
-				const channelModelName = findChannelModelName(channel, resolvedNames);
+				channelModelName = findChannelModelName(channel, resolvedNames);
 				if (channelModelName !== model) {
 					channelParsedBody = { ...parsedBody, model: channelModelName };
 					channelRequestText = JSON.stringify(channelParsedBody);
@@ -482,6 +484,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 						// Convert response based on channel format
 						lastResponse = await convertResponse(channel, response, isStream);
 						selectedChannel = channel;
+						selectedModelName = channelModelName;
 						break;
 					}
 
@@ -534,7 +537,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 
 	const channelForUsage = selectedChannel ?? lastChannel;
 	if (channelForUsage && lastResponse) {
-		const price = getModelPrice(channelForUsage.models_json, effectiveModel ?? "");
+		const price = getModelPrice(channelForUsage.models_json, selectedModelName ?? "");
 		const record = async (
 			usage: NormalizedUsage | null,
 			firstTokenLatencyMs?: number | null,

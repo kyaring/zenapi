@@ -121,6 +121,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 	let lastChannel: ChannelRecord | null = null;
 	const start = Date.now();
 	let selectedChannel: ChannelRecord | null = null;
+	let selectedModelName: string | null = effectiveModel;
 
 	let round = 0;
 	while (round < retryRounds && !selectedChannel) {
@@ -135,8 +136,9 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			// Determine the model name this channel actually supports
 			let channelRequestText = effectiveRequestText;
 			let channelOpenaiBody = openaiBody;
+			let channelModelName = effectiveModel;
 			if (!targetChannel && resolvedNames.length > 1 && parsedBody) {
-				const channelModelName = findChannelModelName(channel, resolvedNames);
+				channelModelName = findChannelModelName(channel, resolvedNames);
 				if (channelModelName !== model) {
 					const channelParsedBody = { ...parsedBody, model: channelModelName };
 					channelRequestText = JSON.stringify(channelParsedBody);
@@ -170,6 +172,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 
 						if (response.ok) {
 							selectedChannel = channel;
+							selectedModelName = channelModelName;
 							lastResponse = response;
 							break;
 						}
@@ -193,6 +196,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 
 						if (response.ok) {
 							selectedChannel = channel;
+							selectedModelName = channelModelName;
 							// Convert OpenAI response back to Anthropic format
 							if (isStream && response.body) {
 								const transform = createOpenaiToAnthropicStreamTransform(
@@ -246,6 +250,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 
 						if (response.ok) {
 							selectedChannel = channel;
+							selectedModelName = channelModelName;
 							lastResponse = response;
 							break;
 						}
@@ -301,7 +306,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 	// Record usage
 	const channelForUsage = selectedChannel ?? lastChannel;
 	if (channelForUsage && lastResponse) {
-		const price = getModelPrice(channelForUsage.models_json, effectiveModel ?? "");
+		const price = getModelPrice(channelForUsage.models_json, selectedModelName ?? "");
 		const recordFn = async (
 			usage: NormalizedUsage | null,
 			firstTokenLatencyMs?: number | null,

@@ -16,22 +16,6 @@ export type AliasInput = {
 };
 
 /**
- * Resolves a model name through the alias table.
- * If the name matches an alias, returns the real model_id.
- * Otherwise returns the original name.
- */
-export async function resolveModelAlias(
-	db: D1Database,
-	name: string,
-): Promise<string> {
-	const row = await db
-		.prepare("SELECT model_id FROM model_aliases WHERE alias = ?")
-		.bind(name)
-		.first<{ model_id: string }>();
-	return row ? row.model_id : name;
-}
-
-/**
  * Returns ALL real model IDs that a given name can route to.
  *
  * Example: user requests "claude-opus-4.6"
