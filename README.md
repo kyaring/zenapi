@@ -1,5 +1,7 @@
 # ZenAPI
 
+> 由 [lsy2246/api-worker](https://github.com/lsy2246/api-worker) 衍生开发。
+
 轻量级 AI API 网关，基于 Cloudflare Workers + D1，内置管理后台与多用户系统。
 管理台构建产物通过 Worker Static Assets 与 Worker 一起部署，无需额外托管。
 
