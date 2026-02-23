@@ -134,7 +134,7 @@ export const UsersView = ({
 									<td class="py-2.5 pr-4 font-mono text-stone-600">
 										${user.balance.toFixed(2)}
 									</td>
-									<td class="py-2.5 pr-4">
+									<td class="py-2.5 pr-4 whitespace-nowrap">
 										<span
 											class={`rounded-full px-2 py-0.5 text-xs ${
 												user.status === "active"
