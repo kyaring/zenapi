@@ -648,9 +648,9 @@ export const ChannelsView = ({
 										})
 									}
 								>
-									<option value="openai">OpenAI</option>
-									<option value="anthropic">Anthropic (Claude)</option>
-									<option value="custom">Custom</option>
+									<option value="openai" selected={channelForm.api_format === "openai"}>OpenAI</option>
+									<option value="anthropic" selected={channelForm.api_format === "anthropic"}>Anthropic (Claude)</option>
+									<option value="custom" selected={channelForm.api_format === "custom"}>Custom</option>
 								</select>
 							</div>
 							<div>

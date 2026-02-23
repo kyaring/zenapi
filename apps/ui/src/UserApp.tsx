@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "hono/jsx/dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "hono/jsx/dom";
 import { createApiFetch } from "./core/api";
 import { userTabs } from "./core/constants";
 import type {
@@ -125,9 +125,11 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		setUsage(result.logs);
 	}, [apiFetch]);
 
+	const loadedTabs = useRef<Set<string>>(new Set<string>());
+
 	const loadTab = useCallback(
 		async (tabId: UserTabId) => {
-			setLoading(true);
+			if (!loadedTabs.current!.has(tabId)) setLoading(true);
 			setNotice("");
 			try {
 				if (tabId === "dashboard") await loadDashboard();
@@ -135,6 +137,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 				if (tabId === "tokens") await loadTokens();
 				if (tabId === "usage") await loadUsage();
 				if (tabId === "channels") await loadModels();
+				loadedTabs.current!.add(tabId);
 			} catch (error) {
 				setNotice((error as Error).message);
 			} finally {

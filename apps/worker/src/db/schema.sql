@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 );
 
 CREATE INDEX IF NOT EXISTS usage_logs_created_at ON usage_logs(created_at);
+CREATE INDEX IF NOT EXISTS usage_logs_channel_id ON usage_logs(channel_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
