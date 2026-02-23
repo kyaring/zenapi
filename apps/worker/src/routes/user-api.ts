@@ -227,7 +227,7 @@ userApi.get("/dashboard", async (c) => {
 				COALESCE(SUM(ul.total_tokens), 0) AS total_tokens
 			FROM channels c
 			JOIN users u ON c.contributed_by = u.id
-			LEFT JOIN usage_logs ul ON ul.channel_id = c.id AND ul.created_at >= datetime('now', '-30 days')
+			LEFT JOIN usage_logs ul ON ul.channel_id = c.id
 			WHERE c.contributed_by IS NOT NULL AND c.status = 'active'
 			GROUP BY u.id, u.name, u.linuxdo_id
 			ORDER BY total_requests DESC`,
@@ -244,7 +244,7 @@ userApi.get("/dashboard", async (c) => {
 					COALESCE(SUM(CASE WHEN ul.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS requests,
 					COALESCE(SUM(ul.total_tokens), 0) AS total_tokens
 				FROM channels c
-				LEFT JOIN usage_logs ul ON ul.channel_id = c.id AND ul.created_at >= datetime('now', '-30 days')
+				LEFT JOIN usage_logs ul ON ul.channel_id = c.id
 				WHERE c.contributed_by IS NOT NULL AND c.status = 'active'
 				GROUP BY c.id, c.contributed_by, c.name
 				ORDER BY requests DESC`,
