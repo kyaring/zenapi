@@ -39,7 +39,7 @@ export const UserRegisterView = ({
 			<div class="mx-auto flex min-h-[calc(100vh-57px)] items-center justify-center px-4 py-8">
 			<div class="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-8 shadow-lg">
 				<h1 class="mb-2 font-['Space_Grotesk'] text-2xl tracking-tight text-stone-900">
-					ZenApi
+					ZenAPI
 				</h1>
 				<p class="text-sm text-stone-500">
 					此站点为自用模式，暂不开放注册。
@@ -63,7 +63,7 @@ export const UserRegisterView = ({
 		<div class="mx-auto flex min-h-[calc(100vh-57px)] items-center justify-center px-4 py-8">
 		<div class="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-8 shadow-lg">
 			<h1 class="mb-2 font-['Space_Grotesk'] text-2xl tracking-tight text-stone-900">
-				ZenApi
+				ZenAPI
 			</h1>
 			<p class="text-sm text-stone-500">创建新账户。</p>
 			<form class="mt-6 grid gap-4" onSubmit={handleSubmit}>
