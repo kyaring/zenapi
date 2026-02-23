@@ -1,7 +1,7 @@
 import "./styles.css";
 import { render, useCallback, useEffect, useState } from "hono/jsx/dom";
 import { createApiFetch } from "./core/api";
-import type { SiteMode, User } from "./core/types";
+import type { SiteMode, User, RegistrationMode } from "./core/types";
 import { AdminApp } from "./AdminApp";
 import { LoginView } from "./features/LoginView";
 import { PublicApp } from "./PublicApp";
@@ -28,6 +28,7 @@ const App = () => {
 	const [userRecord, setUserRecord] = useState<User | null>(null);
 	const [userChecked, setUserChecked] = useState(false);
 	const [siteMode, setSiteMode] = useState<SiteMode | null>(null);
+	const [registrationMode, setRegistrationMode] = useState<RegistrationMode>("open");
 	const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
 	const [notice, setNotice] = useState("");
 	const [path, setPath] = useState(() =>
@@ -57,9 +58,10 @@ const App = () => {
 	// Fetch site mode on mount
 	useEffect(() => {
 		const api = createApiFetch(null, () => {});
-		api<{ site_mode: SiteMode; linuxdo_enabled?: boolean }>("/api/public/site-info")
+		api<{ site_mode: SiteMode; registration_mode?: RegistrationMode; linuxdo_enabled?: boolean }>("/api/public/site-info")
 			.then((result) => {
 				setSiteMode(result.site_mode);
+				setRegistrationMode(result.registration_mode ?? "open");
 				setLinuxdoEnabled(result.linuxdo_enabled ?? false);
 			})
 			.catch(() => setSiteMode("personal"));
@@ -109,6 +111,16 @@ const App = () => {
 		updateUserToken(null);
 		navigateTo("/login");
 	}, [updateUserToken, navigateTo]);
+
+	const handleUserRefresh = useCallback(() => {
+		if (!userToken) return;
+		const api = createApiFetch(userToken, () => updateUserToken(null));
+		api<{ user: User }>("/api/u/auth/me")
+			.then((result) => {
+				setUserRecord(result.user);
+			})
+			.catch(() => {});
+	}, [userToken, updateUserToken]);
 
 	const handleAdminLogin = useCallback(
 		async (event: Event) => {
@@ -182,7 +194,7 @@ const App = () => {
 			// No token — redirect to login
 			history.replaceState(null, "", "/login");
 			setPath("/login");
-			return <PublicApp onUserLogin={handleUserLogin} onNavigate={navigateTo} siteMode={siteMode} linuxdoEnabled={linuxdoEnabled} />;
+			return <PublicApp onUserLogin={handleUserLogin} onNavigate={navigateTo} siteMode={siteMode} linuxdoEnabled={linuxdoEnabled} registrationMode={registrationMode} />;
 		}
 		if (!userChecked) {
 			// Token exists but still verifying — show nothing to avoid flash
@@ -192,7 +204,7 @@ const App = () => {
 			// Token was invalid — redirect to login
 			history.replaceState(null, "", "/login");
 			setPath("/login");
-			return <PublicApp onUserLogin={handleUserLogin} onNavigate={navigateTo} siteMode={siteMode} linuxdoEnabled={linuxdoEnabled} />;
+			return <PublicApp onUserLogin={handleUserLogin} onNavigate={navigateTo} siteMode={siteMode} linuxdoEnabled={linuxdoEnabled} registrationMode={registrationMode} />;
 		}
 		return (
 			<div class="min-h-screen bg-linear-to-b from-white via-stone-50 to-stone-100 font-['IBM_Plex_Sans'] text-stone-900 antialiased">
@@ -201,6 +213,8 @@ const App = () => {
 					user={userRecord}
 					updateToken={updateUserToken}
 					onNavigate={navigateTo}
+					linuxdoEnabled={linuxdoEnabled}
+					onUserRefresh={handleUserRefresh}
 				/>
 			</div>
 		);
@@ -214,7 +228,7 @@ const App = () => {
 		return null;
 	}
 
-	return <PublicApp onUserLogin={handleUserLogin} onNavigate={navigateTo} siteMode={siteMode} linuxdoEnabled={linuxdoEnabled} />;
+	return <PublicApp onUserLogin={handleUserLogin} onNavigate={navigateTo} siteMode={siteMode} linuxdoEnabled={linuxdoEnabled} registrationMode={registrationMode} />;
 };
 
 render(<App />, root);

@@ -198,6 +198,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 			session_ttl_hours: String(data.settings.session_ttl_hours ?? 12),
 			admin_password: "",
 			site_mode: data.settings.site_mode ?? "personal",
+			registration_mode: data.settings.registration_mode ?? "open",
 		});
 	}, [data.settings]);
 
@@ -446,6 +447,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 				log_retention_days: retention,
 				session_ttl_hours: sessionTtlHours,
 				site_mode: settingsForm.site_mode,
+				registration_mode: settingsForm.registration_mode,
 			};
 			const password = settingsForm.admin_password.trim();
 			if (password) {

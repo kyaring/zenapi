@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "hono/jsx/dom";
 import { createApiFetch } from "./core/api";
 import { UserLoginView } from "./features/UserLoginView";
 import { UserRegisterView } from "./features/UserRegisterView";
+import type { RegistrationMode } from "./core/types";
 
 const normalizePath = (path: string) => {
 	if (path.length <= 1) return "/";
@@ -13,9 +14,10 @@ type PublicAppProps = {
 	onNavigate: (path: string) => void;
 	siteMode: "personal" | "service" | "shared";
 	linuxdoEnabled: boolean;
+	registrationMode: RegistrationMode;
 };
 
-export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled }: PublicAppProps) => {
+export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled, registrationMode }: PublicAppProps) => {
 	const [page, setPage] = useState<"login" | "register">(() => {
 		const normalized = normalizePath(window.location.pathname);
 		if (normalized === "/register") return "register";
@@ -142,6 +144,7 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled }:
 					onGoLogin={() => navigate("login")}
 					onNavigate={onNavigate}
 					linuxdoEnabled={linuxdoEnabled}
+					registrationMode={registrationMode}
 				/>
 			</div>
 		);
@@ -160,6 +163,7 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled }:
 						ZenAPI
 					</button>
 					<div class="flex gap-3">
+						{registrationMode !== "closed" && (
 						<button
 							type="button"
 							class="rounded-lg px-4 py-2 text-sm text-stone-500 hover:text-stone-900"
@@ -167,6 +171,7 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled }:
 						>
 							注册
 						</button>
+						)}
 						<button
 							type="button"
 							class="rounded-lg px-4 py-2 text-sm text-stone-400 hover:text-stone-600"
@@ -183,6 +188,7 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled }:
 				onGoRegister={() => navigate("register")}
 				onNavigate={onNavigate}
 				linuxdoEnabled={linuxdoEnabled}
+				registrationMode={registrationMode}
 			/>
 		</div>
 	);

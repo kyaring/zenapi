@@ -3,7 +3,7 @@ import type { AppEnv } from "../env";
 import { extractModelPricings, extractSharedModelPricings } from "../services/channel-models";
 import { listActiveChannels } from "../services/channel-repo";
 import { loadPrimaryNameMap } from "../services/model-aliases";
-import { getSiteMode } from "../services/settings";
+import { getRegistrationMode, getSiteMode } from "../services/settings";
 
 const publicRoutes = new Hono<AppEnv>();
 
@@ -12,8 +12,9 @@ const publicRoutes = new Hono<AppEnv>();
  */
 publicRoutes.get("/site-info", async (c) => {
 	const siteMode = await getSiteMode(c.env.DB);
+	const registrationMode = await getRegistrationMode(c.env.DB);
 	const linuxdoEnabled = Boolean(c.env.LINUXDO_CLIENT_ID);
-	return c.json({ site_mode: siteMode, linuxdo_enabled: linuxdoEnabled });
+	return c.json({ site_mode: siteMode, registration_mode: registrationMode, linuxdo_enabled: linuxdoEnabled });
 });
 
 /**

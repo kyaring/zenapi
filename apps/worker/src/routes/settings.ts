@@ -1,14 +1,17 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import {
+	getRegistrationMode,
 	getRetentionDays,
 	getSessionTtlHours,
 	getSiteMode,
 	isAdminPasswordSet,
 	setAdminPasswordHash,
+	setRegistrationMode,
 	setRetentionDays,
 	setSessionTtlHours,
 	setSiteMode,
+	type RegistrationMode,
 	type SiteMode,
 } from "../services/settings";
 import { sha256Hex } from "../utils/crypto";
@@ -24,11 +27,13 @@ settings.get("/", async (c) => {
 	const sessionTtlHours = await getSessionTtlHours(c.env.DB);
 	const adminPasswordSet = await isAdminPasswordSet(c.env.DB);
 	const siteMode = await getSiteMode(c.env.DB);
+	const registrationMode = await getRegistrationMode(c.env.DB);
 	return c.json({
 		log_retention_days: retention,
 		session_ttl_hours: sessionTtlHours,
 		admin_password_set: adminPasswordSet,
 		site_mode: siteMode,
+		registration_mode: registrationMode,
 	});
 });
 
@@ -88,6 +93,20 @@ settings.put("/", async (c) => {
 			);
 		}
 		await setSiteMode(c.env.DB, body.site_mode);
+		touched = true;
+	}
+
+	if (body.registration_mode !== undefined) {
+		const validModes: RegistrationMode[] = ["open", "linuxdo_only", "closed"];
+		if (!validModes.includes(body.registration_mode)) {
+			return jsonError(
+				c,
+				400,
+				"invalid_registration_mode",
+				"invalid_registration_mode",
+			);
+		}
+		await setRegistrationMode(c.env.DB, body.registration_mode);
 		touched = true;
 	}
 

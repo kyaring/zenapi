@@ -1,4 +1,5 @@
 import { useState } from "hono/jsx/dom";
+import type { RegistrationMode } from "../core/types";
 
 type UserLoginViewProps = {
 	notice: string;
@@ -6,6 +7,7 @@ type UserLoginViewProps = {
 	onGoRegister: () => void;
 	onNavigate: (path: string) => void;
 	linuxdoEnabled: boolean;
+	registrationMode: RegistrationMode;
 };
 
 export const UserLoginView = ({
@@ -14,6 +16,7 @@ export const UserLoginView = ({
 	onGoRegister,
 	onNavigate,
 	linuxdoEnabled,
+	registrationMode,
 }: UserLoginViewProps) => {
 	const [account, setAccount] = useState("");
 	const [password, setPassword] = useState("");
@@ -100,6 +103,8 @@ export const UserLoginView = ({
 				</div>
 			)}
 			<p class="mt-4 text-center text-sm text-stone-500">
+				{registrationMode !== "closed" && (
+				<>
 				没有账户？{" "}
 				<button
 					type="button"
@@ -108,6 +113,8 @@ export const UserLoginView = ({
 				>
 					注册
 				</button>
+				</>
+				)}
 			</p>
 			{notice && (
 				<div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">

@@ -3,6 +3,9 @@ import type { User, UserDashboardData } from "../core/types";
 type UserDashboardProps = {
 	data: UserDashboardData | null;
 	user: User;
+	token: string;
+	linuxdoEnabled: boolean;
+	onUnbind: () => void;
 };
 
 function formatCost(n: number): string {
@@ -17,7 +20,7 @@ function formatNumber(n: number): string {
 	return String(n);
 }
 
-export const UserDashboard = ({ data, user }: UserDashboardProps) => {
+export const UserDashboard = ({ data, user, token, linuxdoEnabled, onUnbind }: UserDashboardProps) => {
 	if (!data) {
 		return (
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -63,6 +66,43 @@ export const UserDashboard = ({ data, user }: UserDashboardProps) => {
 					</p>
 				</div>
 			</div>
+
+			{/* Account binding */}
+			{linuxdoEnabled && (
+			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+				<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
+					账号绑定
+				</h3>
+				<div class="flex items-center justify-between">
+					<div>
+						<p class="text-sm font-medium text-stone-700">Linux DO</p>
+						<p class="text-xs text-stone-500">
+							{user.linuxdo_id
+								? `已绑定 (ID: ${user.linuxdo_id})`
+								: "未绑定"}
+						</p>
+					</div>
+					<div>
+						{user.linuxdo_id ? (
+							<button
+								type="button"
+								class="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-600 transition-all hover:border-red-200 hover:text-red-600"
+								onClick={onUnbind}
+							>
+								解除绑定
+							</button>
+						) : (
+							<a
+								href={`/api/u/auth/linuxdo/bind?token=${encodeURIComponent(token)}`}
+								class="inline-flex rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-all hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md"
+							>
+								绑定 Linux DO
+							</a>
+						)}
+					</div>
+				</div>
+			</div>
+			)}
 
 			{/* Recent usage */}
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">

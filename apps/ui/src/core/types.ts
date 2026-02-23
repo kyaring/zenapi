@@ -110,11 +110,14 @@ export type MonitoringData = {
 
 export type SiteMode = "personal" | "service" | "shared";
 
+export type RegistrationMode = "open" | "linuxdo_only" | "closed";
+
 export type Settings = {
 	log_retention_days: number;
 	session_ttl_hours: number;
 	admin_password_set?: boolean;
 	site_mode: SiteMode;
+	registration_mode: RegistrationMode;
 };
 
 export type ModelChannel = {
@@ -180,6 +183,7 @@ export type SettingsForm = {
 	session_ttl_hours: string;
 	admin_password: string;
 	site_mode: SiteMode;
+	registration_mode: RegistrationMode;
 };
 
 // User types
@@ -192,6 +196,7 @@ export type User = {
 	status: string;
 	created_at: string;
 	updated_at: string;
+	linuxdo_id?: string | null;
 };
 
 export type UserDashboardData = {

@@ -114,6 +114,10 @@ const SITE_MODE_KEY = "site_mode";
 export type SiteMode = "personal" | "service" | "shared";
 const VALID_SITE_MODES: SiteMode[] = ["personal", "service", "shared"];
 
+const REGISTRATION_MODE_KEY = "registration_mode";
+export type RegistrationMode = "open" | "linuxdo_only" | "closed";
+const VALID_REGISTRATION_MODES: RegistrationMode[] = ["open", "linuxdo_only", "closed"];
+
 /**
  * Returns the site mode setting.
  */
@@ -136,6 +140,30 @@ export async function setSiteMode(
 		return;
 	}
 	await upsertSetting(db, SITE_MODE_KEY, mode);
+}
+
+/**
+ * Returns the registration mode setting.
+ */
+export async function getRegistrationMode(db: D1Database): Promise<RegistrationMode> {
+	const value = await readSetting(db, REGISTRATION_MODE_KEY);
+	if (value && VALID_REGISTRATION_MODES.includes(value as RegistrationMode)) {
+		return value as RegistrationMode;
+	}
+	return "open";
+}
+
+/**
+ * Updates the registration mode setting.
+ */
+export async function setRegistrationMode(
+	db: D1Database,
+	mode: RegistrationMode,
+): Promise<void> {
+	if (!VALID_REGISTRATION_MODES.includes(mode)) {
+		return;
+	}
+	await upsertSetting(db, REGISTRATION_MODE_KEY, mode);
 }
 
 /**

@@ -53,4 +53,5 @@ export const initialSettingsForm: SettingsForm = {
 	session_ttl_hours: "12",
 	admin_password: "",
 	site_mode: "personal",
+	registration_mode: "open",
 };

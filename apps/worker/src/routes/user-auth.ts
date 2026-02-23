@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import type { UserRecord } from "../middleware/userAuth";
 import { userAuth } from "../middleware/userAuth";
-import { getSiteMode } from "../services/settings";
+import { getRegistrationMode, getSiteMode } from "../services/settings";
 import { generateToken, sha256Hex } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { addHours, nowIso } from "../utils/time";
@@ -19,6 +19,11 @@ const userAuthRoutes = new Hono<AppEnv>();
 userAuthRoutes.post("/register", async (c) => {
 	const siteMode = await getSiteMode(c.env.DB);
 	if (siteMode === "personal") {
+		return jsonError(c, 403, "registration_disabled", "registration_disabled");
+	}
+
+	const registrationMode = await getRegistrationMode(c.env.DB);
+	if (registrationMode === "closed" || registrationMode === "linuxdo_only") {
 		return jsonError(c, 403, "registration_disabled", "registration_disabled");
 	}
 
@@ -151,7 +156,17 @@ userAuthRoutes.post("/logout", userAuth, async (c) => {
  */
 userAuthRoutes.get("/me", userAuth, async (c) => {
 	const user = c.get("userRecord") as UserRecord;
-	return c.json({ user });
+	return c.json({
+		user: {
+			id: user.id,
+			email: user.email,
+			name: user.name,
+			role: user.role,
+			balance: user.balance,
+			status: user.status,
+			linuxdo_id: user.linuxdo_id ?? null,
+		},
+	});
 });
 
 /**
@@ -163,6 +178,10 @@ userAuthRoutes.get("/linuxdo", async (c) => {
 		return jsonError(c, 503, "linuxdo_not_configured", "Linux DO login is not configured");
 	}
 
+	// Linux DO login/register redirect.
+	// Block only in personal mode (no users at all).
+	// In other modes, always allow — existing linked users can log in,
+	// and the callback will enforce registrationMode for new user creation.
 	const siteMode = await getSiteMode(c.env.DB);
 	if (siteMode === "personal") {
 		return jsonError(c, 403, "registration_disabled", "registration_disabled");
@@ -185,6 +204,72 @@ userAuthRoutes.get("/linuxdo", async (c) => {
 	const headers = new Headers();
 	headers.set("Location", `${LINUXDO_AUTH_URL}?${params.toString()}`);
 	headers.set("Set-Cookie", `linuxdo_state=${stateHash}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`);
+
+	return new Response(null, { status: 302, headers });
+});
+
+/**
+ * Initiates Linux DO account binding for an already-logged-in user.
+ * Uses query param `token` because browser redirect can't carry Authorization header.
+ */
+userAuthRoutes.get("/linuxdo/bind", async (c) => {
+	const clientId = c.env.LINUXDO_CLIENT_ID;
+	if (!clientId) {
+		return jsonError(c, 503, "linuxdo_not_configured", "Linux DO login is not configured");
+	}
+
+	const token = c.req.query("token");
+	if (!token) {
+		return redirectWithError(c, "missing_token");
+	}
+
+	// Verify user session
+	const tokenHash = await sha256Hex(token);
+	const session = await c.env.DB.prepare(
+		"SELECT user_id, expires_at FROM user_sessions WHERE token_hash = ?",
+	)
+		.bind(tokenHash)
+		.first<{ user_id: string; expires_at: string }>();
+
+	if (!session || new Date(String(session.expires_at)).getTime() <= Date.now()) {
+		return redirectWithError(c, "invalid_token");
+	}
+
+	// Check if user already has linuxdo bound
+	const user = await c.env.DB.prepare(
+		"SELECT id, linuxdo_id FROM users WHERE id = ?",
+	)
+		.bind(session.user_id)
+		.first<{ id: string; linuxdo_id?: string }>();
+
+	if (!user) {
+		return redirectWithError(c, "user_not_found");
+	}
+	if (user.linuxdo_id) {
+		return redirectWithError(c, "already_bound");
+	}
+
+	const origin = new URL(c.req.url).origin;
+	const redirectUri = `${origin}/api/u/auth/linuxdo/callback`;
+
+	const state = generateToken("ldo_");
+	const stateHash = await sha256Hex(state);
+
+	const params = new URLSearchParams({
+		client_id: clientId,
+		redirect_uri: redirectUri,
+		response_type: "code",
+		scope: "user",
+		state,
+	});
+
+	// Store bind info in cookie: hash:user_id
+	const bindCookieValue = `${await sha256Hex(session.user_id)}:${session.user_id}`;
+
+	const headers = new Headers();
+	headers.set("Location", `${LINUXDO_AUTH_URL}?${params.toString()}`);
+	headers.append("Set-Cookie", `linuxdo_state=${stateHash}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`);
+	headers.append("Set-Cookie", `linuxdo_bind_user=${bindCookieValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`);
 
 	return new Response(null, { status: 302, headers });
 });
@@ -274,6 +359,60 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 	const linuxdoId = String(linuxdoUser.id);
 	const now = nowIso();
 
+	// Check if this is a bind flow (linuxdo_bind_user cookie present)
+	const bindCookie = parseCookie(cookieHeader, "linuxdo_bind_user");
+	if (bindCookie) {
+		// Bind flow: link linuxdo_id to existing user
+		const parts = bindCookie.split(":");
+		if (parts.length !== 2) {
+			return redirectWithBindError(c, "invalid_bind_cookie");
+		}
+		const [hashPart, userId] = parts;
+		const expectedHash = await sha256Hex(userId);
+		if (hashPart !== expectedHash) {
+			return redirectWithBindError(c, "invalid_bind_cookie");
+		}
+
+		// Check if this linuxdo_id is already taken by another user
+		const existingLinuxdo = await c.env.DB.prepare(
+			"SELECT id FROM users WHERE linuxdo_id = ?",
+		)
+			.bind(linuxdoId)
+			.first<{ id: string }>();
+
+		if (existingLinuxdo) {
+			return redirectWithBindError(c, "linuxdo_already_taken");
+		}
+
+		// Check if user already has a linuxdo_id
+		const currentUser = await c.env.DB.prepare(
+			"SELECT id, linuxdo_id FROM users WHERE id = ?",
+		)
+			.bind(userId)
+			.first<{ id: string; linuxdo_id?: string }>();
+
+		if (!currentUser) {
+			return redirectWithBindError(c, "user_not_found");
+		}
+		if (currentUser.linuxdo_id) {
+			return redirectWithBindError(c, "already_bound");
+		}
+
+		await c.env.DB.prepare(
+			"UPDATE users SET linuxdo_id = ?, updated_at = ? WHERE id = ?",
+		)
+			.bind(linuxdoId, now, userId)
+			.run();
+
+		// Clear cookies and redirect to user dashboard
+		const headers = new Headers();
+		headers.set("Location", `${origin}/user?linuxdo_bindok=1`);
+		headers.append("Set-Cookie", "linuxdo_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+		headers.append("Set-Cookie", "linuxdo_bind_user=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+		return new Response(null, { status: 302, headers });
+	}
+
+	// Normal login/register flow
 	// Check if user already linked with this Linux DO account
 	let user = await c.env.DB.prepare(
 		"SELECT id, email, name, role, balance, status FROM users WHERE linuxdo_id = ?",
@@ -290,6 +429,11 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 		// New user — create account
 		const siteMode = await getSiteMode(c.env.DB);
 		if (siteMode === "personal") {
+			return redirectWithError(c, "registration_disabled");
+		}
+
+		const registrationMode = await getRegistrationMode(c.env.DB);
+		if (registrationMode === "closed") {
 			return redirectWithError(c, "registration_disabled");
 		}
 
@@ -340,11 +484,38 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 	return new Response(null, { status: 302, headers });
 });
 
+/**
+ * Unbinds the current user's Linux DO account.
+ */
+userAuthRoutes.post("/linuxdo/unbind", userAuth, async (c) => {
+	const user = c.get("userRecord") as UserRecord;
+	if (!user.linuxdo_id) {
+		return jsonError(c, 400, "not_bound", "not_bound");
+	}
+
+	await c.env.DB.prepare(
+		"UPDATE users SET linuxdo_id = NULL, updated_at = ? WHERE id = ?",
+	)
+		.bind(nowIso(), user.id)
+		.run();
+
+	return c.json({ ok: true });
+});
+
 function redirectWithError(c: { req: { url: string } }, error: string) {
 	const origin = new URL(c.req.url).origin;
 	const headers = new Headers();
 	headers.set("Location", `${origin}/login?linuxdo_error=${encodeURIComponent(error)}`);
 	headers.set("Set-Cookie", "linuxdo_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+	return new Response(null, { status: 302, headers });
+}
+
+function redirectWithBindError(c: { req: { url: string } }, error: string) {
+	const origin = new URL(c.req.url).origin;
+	const headers = new Headers();
+	headers.set("Location", `${origin}/user?linuxdo_binderror=${encodeURIComponent(error)}`);
+	headers.append("Set-Cookie", "linuxdo_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+	headers.append("Set-Cookie", "linuxdo_bind_user=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
 	return new Response(null, { status: 302, headers });
 }
 

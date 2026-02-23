@@ -21,6 +21,8 @@ type UserAppProps = {
 	user: User;
 	updateToken: (next: string | null) => void;
 	onNavigate: (path: string) => void;
+	linuxdoEnabled: boolean;
+	onUserRefresh: () => void;
 };
 
 const normalizePath = (path: string) => {
@@ -44,7 +46,7 @@ const userPathToTab: Record<string, UserTabId> = {
 	"/user/channels": "channels",
 };
 
-export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) => {
+export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, onUserRefresh }: UserAppProps) => {
 	const [activeTab, setActiveTab] = useState<UserTabId>(() => {
 		const normalized = normalizePath(window.location.pathname);
 		return userPathToTab[normalized] ?? "dashboard";
@@ -58,6 +60,29 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 	const [tokens, setTokens] = useState<Token[]>([]);
 	const [usage, setUsage] = useState<UsageLog[]>([]);
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+	// Handle Linux DO bind callback parameters
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const bindOk = params.get("linuxdo_bindok");
+		const bindError = params.get("linuxdo_binderror");
+		if (bindOk) {
+			history.replaceState(null, "", "/user");
+			setNotice("Linux DO 账号绑定成功");
+			onUserRefresh();
+		} else if (bindError) {
+			history.replaceState(null, "", "/user");
+			const errorMessages: Record<string, string> = {
+				missing_token: "绑定失败：缺少令牌",
+				invalid_token: "绑定失败：令牌无效或已过期",
+				user_not_found: "绑定失败：用户不存在",
+				already_bound: "绑定失败：已绑定 Linux DO 账号",
+				linuxdo_already_taken: "绑定失败：该 Linux DO 账号已被其他用户绑定",
+				invalid_bind_cookie: "绑定失败：绑定状态无效",
+			};
+			setNotice(errorMessages[bindError] ?? `绑定失败：${bindError}`);
+		}
+	}, [onUserRefresh]);
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
@@ -149,6 +174,16 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 		updateToken(null);
 	}, [apiFetch, updateToken]);
 
+	const handleLinuxdoUnbind = useCallback(async () => {
+		try {
+			await apiFetch("/api/u/auth/linuxdo/unbind", { method: "POST" });
+			setNotice("Linux DO 账号已解除绑定");
+			onUserRefresh();
+		} catch (error) {
+			setNotice((error as Error).message);
+		}
+	}, [apiFetch, onUserRefresh]);
+
 	const handleTokenCreate = useCallback(
 		async (name: string) => {
 			try {
@@ -227,7 +262,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 			);
 		}
 		if (activeTab === "dashboard") {
-			return <UserDashboard data={dashboardData} user={user} />;
+			return <UserDashboard data={dashboardData} user={user} token={token} linuxdoEnabled={linuxdoEnabled} onUnbind={handleLinuxdoUnbind} />;
 		}
 		if (activeTab === "models") {
 			return <UserModelsView models={models} siteMode={siteMode} />;
