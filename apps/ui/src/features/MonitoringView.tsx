@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "hono/jsx/dom";
 import { apiBase } from "../core/constants";
-import type { MonitoringChannelData, MonitoringData, MonitoringDailyTrend, MonitoringErrorDetail } from "../core/types";
+import type { MonitoringChannelData, MonitoringData, MonitoringDailyTrend, MonitoringErrorDetail, MonitoringSlotModel } from "../core/types";
 
 type MonitoringViewProps = {
 	monitoring: MonitoringData | null;
@@ -108,39 +108,48 @@ type ChannelBarProps = {
 const ChannelBar = ({ channel, slots, range, trendMap, token }: ChannelBarProps) => {
 	const [hoveredSlot, setHoveredSlot] = useState<string | null>(null);
 	const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+	const [slotModels, setSlotModels] = useState<MonitoringSlotModel[]>([]);
 	const [errorDetails, setErrorDetails] = useState<MonitoringErrorDetail[]>([]);
-	const [loadingErrors, setLoadingErrors] = useState(false);
+	const [loadingDetails, setLoadingDetails] = useState(false);
 
 	const hoveredTrend = hoveredSlot ? trendMap.get(`${channel.channel_id}|${hoveredSlot}`) : null;
 
 	const handleSlotClick = async (slot: string) => {
 		const trend = trendMap.get(`${channel.channel_id}|${slot}`);
-		if (!trend || trend.errors === 0) return;
+		if (!trend) return;
 
 		if (selectedSlot === slot) {
 			setSelectedSlot(null);
+			setSlotModels([]);
 			setErrorDetails([]);
 			return;
 		}
 
 		setSelectedSlot(slot);
-		setLoadingErrors(true);
+		setLoadingDetails(true);
 		try {
 			const headers: Record<string, string> = { "Content-Type": "application/json" };
 			if (token) headers.Authorization = `Bearer ${token}`;
 			const res = await fetch(
-				`${apiBase}/api/monitoring/errors?slot=${encodeURIComponent(slot)}&channel_id=${encodeURIComponent(String(channel.channel_id))}&range=${range}`,
+				`${apiBase}/api/monitoring/slot-details?slot=${encodeURIComponent(slot)}&channel_id=${encodeURIComponent(String(channel.channel_id))}&range=${range}`,
 				{ headers },
 			);
 			if (res.ok) {
-				const data = (await res.json()) as { errors: MonitoringErrorDetail[] };
+				const data = (await res.json()) as { models: MonitoringSlotModel[]; errors: MonitoringErrorDetail[] };
+				setSlotModels(data.models);
 				setErrorDetails(data.errors);
 			}
 		} catch {
 			/* ignore */
 		} finally {
-			setLoadingErrors(false);
+			setLoadingDetails(false);
 		}
+	};
+
+	const closePanel = () => {
+		setSelectedSlot(null);
+		setSlotModels([]);
+		setErrorDetails([]);
 	};
 
 	return (
@@ -220,49 +229,83 @@ const ChannelBar = ({ channel, slots, range, trendMap, token }: ChannelBarProps)
 				</div>
 			)}
 
-			{/* Error details panel */}
+			{/* Slot details panel */}
 			{selectedSlot && (
-				<div class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+				<div class="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
 					<div class="mb-2 flex items-center justify-between">
-						<span class="text-sm font-medium text-red-800">
-							错误详情 — {formatSlotLabel(selectedSlot, range)}
+						<span class="text-sm font-medium text-stone-800">
+							{formatSlotLabel(selectedSlot, range)} 请求详情
 						</span>
 						<button
 							type="button"
-							class="text-xs text-red-400 hover:text-red-600"
-							onClick={() => { setSelectedSlot(null); setErrorDetails([]); }}
+							class="text-xs text-stone-400 hover:text-stone-600"
+							onClick={closePanel}
 						>
 							关闭
 						</button>
 					</div>
-					{loadingErrors ? (
-						<div class="text-xs text-red-400">加载中...</div>
-					) : errorDetails.length === 0 ? (
-						<div class="text-xs text-red-400">无错误记录</div>
+					{loadingDetails ? (
+						<div class="text-xs text-stone-400">加载中...</div>
 					) : (
-						<div class="max-h-60 space-y-2 overflow-y-auto">
-							{errorDetails.map((err) => (
-								<div key={err.id} class="rounded bg-white p-2 text-xs shadow-sm">
-									<div class="flex items-center gap-2">
-										{err.error_code && (
-											<span class="font-mono font-medium text-red-600">{err.error_code}</span>
-										)}
-										{err.model && (
-											<span class="text-stone-600">{err.model}</span>
-										)}
-										{err.latency_ms != null && (
-											<span class="text-stone-400">{err.latency_ms}ms</span>
-										)}
-										<span class="ml-auto text-stone-400">{err.created_at}</span>
+						<>
+							{/* Model summary table */}
+							{slotModels.length > 0 && (
+								<table class="w-full text-xs">
+									<thead>
+										<tr class="border-b border-stone-200 text-left text-stone-500">
+											<th class="pb-1 font-medium">模型</th>
+											<th class="pb-1 text-right font-medium">请求</th>
+											<th class="pb-1 text-right font-medium">成功</th>
+											<th class="pb-1 text-right font-medium">错误</th>
+											<th class="pb-1 text-right font-medium">延迟</th>
+										</tr>
+									</thead>
+									<tbody>
+										{slotModels.map((m) => (
+											<tr key={m.model} class="border-b border-stone-100">
+												<td class="py-1 font-mono text-stone-700">{m.model}</td>
+												<td class="py-1 text-right text-stone-600">{m.requests}</td>
+												<td class="py-1 text-right text-green-600">{m.success}</td>
+												<td class={`py-1 text-right ${m.errors > 0 ? "text-red-600 font-medium" : "text-stone-400"}`}>{m.errors}</td>
+												<td class="py-1 text-right text-stone-500">{m.avg_latency_ms}ms</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							)}
+
+							{/* Error details */}
+							{errorDetails.length > 0 && (
+								<div class="mt-3 rounded-lg border border-red-200 bg-red-50 p-2">
+									<div class="mb-1.5 text-xs font-medium text-red-800">
+										错误详情 ({errorDetails.length})
 									</div>
-									{err.error_message && (
-										<pre class="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-all rounded bg-red-50 p-1 text-xs text-red-700">
-											{err.error_message}
-										</pre>
-									)}
+									<div class="max-h-60 space-y-2 overflow-y-auto">
+										{errorDetails.map((err) => (
+											<div key={err.id} class="rounded bg-white p-2 text-xs shadow-sm">
+												<div class="flex items-center gap-2">
+													{err.error_code && (
+														<span class="font-mono font-medium text-red-600">{err.error_code}</span>
+													)}
+													{err.model && (
+														<span class="text-stone-600">{err.model}</span>
+													)}
+													{err.latency_ms != null && (
+														<span class="text-stone-400">{err.latency_ms}ms</span>
+													)}
+													<span class="ml-auto text-stone-400">{err.created_at}</span>
+												</div>
+												{err.error_message && (
+													<pre class="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-all rounded bg-red-50 p-1 text-xs text-red-700">
+														{err.error_message}
+													</pre>
+												)}
+											</div>
+										))}
+									</div>
 								</div>
-							))}
-						</div>
+							)}
+						</>
 					)}
 				</div>
 			)}

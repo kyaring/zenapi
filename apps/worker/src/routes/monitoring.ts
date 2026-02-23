@@ -180,30 +180,52 @@ monitoring.get("/", async (c) => {
 	});
 });
 
-monitoring.get("/errors", async (c) => {
+monitoring.get("/slot-details", async (c) => {
 	const slot = c.req.query("slot");
 	const channelId = c.req.query("channel_id");
 	const range = c.req.query("range") ?? "7d";
 
 	if (!slot || !channelId) {
-		return c.json({ errors: [] });
+		return c.json({ models: [], errors: [] });
 	}
 
 	const config = RANGE_CONFIG[range] ?? RANGE_CONFIG["7d"];
+	const slotFilter = `substr(created_at, 1, ${config.sqlSlice}) = ?`;
 
-	const rows = await c.env.DB.prepare(
+	const modelRows = await c.env.DB.prepare(
+		`SELECT
+			COALESCE(model, 'unknown') AS model,
+			COUNT(*) AS requests,
+			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS success,
+			SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors,
+			COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
+		FROM usage_logs
+		WHERE ${slotFilter} AND channel_id = ?
+		GROUP BY model
+		ORDER BY requests DESC`,
+	)
+		.bind(slot, channelId)
+		.all();
+
+	const models = (modelRows.results ?? []).map((row) => ({
+		model: row.model as string,
+		requests: Number(row.requests),
+		success: Number(row.success),
+		errors: Number(row.errors),
+		avg_latency_ms: Math.round(Number(row.avg_latency_ms)),
+	}));
+
+	const errorRows = await c.env.DB.prepare(
 		`SELECT id, model, channel_id, error_code, error_message, latency_ms, created_at
 		FROM usage_logs
-		WHERE substr(created_at, 1, ${config.sqlSlice}) = ?
-			AND channel_id = ?
-			AND status != 'ok'
+		WHERE ${slotFilter} AND channel_id = ? AND status != 'ok'
 		ORDER BY created_at DESC
 		LIMIT 50`,
 	)
 		.bind(slot, channelId)
 		.all();
 
-	const errors = (rows.results ?? []).map((row) => ({
+	const errors = (errorRows.results ?? []).map((row) => ({
 		id: row.id,
 		model: row.model,
 		channel_id: row.channel_id,
@@ -213,7 +235,7 @@ monitoring.get("/errors", async (c) => {
 		created_at: row.created_at,
 	}));
 
-	return c.json({ errors });
+	return c.json({ models, errors });
 });
 
 export default monitoring;

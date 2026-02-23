@@ -96,6 +96,14 @@ export type MonitoringErrorDetail = {
 	created_at: string;
 };
 
+export type MonitoringSlotModel = {
+	model: string;
+	requests: number;
+	success: number;
+	errors: number;
+	avg_latency_ms: number;
+};
+
 export type MonitoringData = {
 	summary: {
 		total_requests: number;
