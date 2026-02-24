@@ -239,6 +239,7 @@ userApi.get("/dashboard", async (c) => {
 	let contributions: Array<{
 		user_name: string;
 		linuxdo_id: string | null;
+		linuxdo_username: string | null;
 		tip_url: string | null;
 		channel_count: number;
 		channels: Array<{ name: string; requests: number; total_tokens: number }>;
@@ -252,6 +253,7 @@ userApi.get("/dashboard", async (c) => {
 				u.id AS user_id,
 				u.name AS user_name,
 				u.linuxdo_id,
+				u.linuxdo_username,
 				u.tip_url,
 				COUNT(DISTINCT c.id) AS channel_count,
 				COALESCE(SUM(CASE WHEN ul.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_requests,
@@ -260,7 +262,7 @@ userApi.get("/dashboard", async (c) => {
 			JOIN users u ON c.contributed_by = u.id
 			LEFT JOIN usage_logs ul ON ul.channel_id = c.id
 			WHERE c.contributed_by IS NOT NULL AND c.status = 'active'
-			GROUP BY u.id, u.name, u.linuxdo_id, u.tip_url
+			GROUP BY u.id, u.name, u.linuxdo_id, u.linuxdo_username, u.tip_url
 			ORDER BY total_requests DESC`,
 		).all();
 
@@ -296,6 +298,7 @@ userApi.get("/dashboard", async (c) => {
 		contributions = (contribRows.results ?? []).map((row) => ({
 			user_name: String(row.user_name),
 			linuxdo_id: row.linuxdo_id ? String(row.linuxdo_id) : null,
+			linuxdo_username: row.linuxdo_username ? String(row.linuxdo_username) : null,
 			tip_url: row.tip_url ? String(row.tip_url) : null,
 			channel_count: Number(row.channel_count),
 			channels: channelDetailMap.get(String(row.user_id)) ?? [],

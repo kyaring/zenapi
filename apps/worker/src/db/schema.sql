@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS users (
   balance REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   linuxdo_id TEXT,
+  linuxdo_username TEXT,
   tip_url TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

@@ -33,7 +33,7 @@ const ContributionBoard = ({ contributions }: { contributions: ContributionEntry
 				贡献榜
 			</h3>
 			<div class="overflow-x-auto">
-				<table class="w-full text-left text-sm">
+				<table class="w-full text-left text-sm" id="zenapi-contribution-board">
 					<thead>
 						<tr class="border-b border-stone-100 text-xs uppercase tracking-widest text-stone-400">
 							<th class="pb-2 pr-4 font-medium">#</th>
@@ -52,6 +52,9 @@ const ContributionBoard = ({ contributions }: { contributions: ContributionEntry
 										key={`row-${idx}`}
 										class={`border-b border-stone-50 cursor-pointer transition-colors hover:bg-stone-50 ${isExpanded ? "bg-stone-50" : ""}`}
 										onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+										{...(entry.linuxdo_id ? { "data-linuxdo-id": entry.linuxdo_id } : {})}
+										{...(entry.linuxdo_username ? { "data-linuxdo-username": entry.linuxdo_username } : {})}
+										data-contributor-name={entry.user_name}
 									>
 										<td class="py-2.5 pr-4 text-stone-400">{idx + 1}</td>
 										<td class="py-2.5 pr-4">

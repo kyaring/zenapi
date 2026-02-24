@@ -165,6 +165,7 @@ userAuthRoutes.get("/me", userAuth, async (c) => {
 			balance: user.balance,
 			status: user.status,
 			linuxdo_id: user.linuxdo_id ?? null,
+			linuxdo_username: user.linuxdo_username ?? null,
 			tip_url: user.tip_url ?? null,
 		},
 	});
@@ -400,9 +401,9 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 		}
 
 		await c.env.DB.prepare(
-			"UPDATE users SET linuxdo_id = ?, updated_at = ? WHERE id = ?",
+			"UPDATE users SET linuxdo_id = ?, linuxdo_username = ?, updated_at = ? WHERE id = ?",
 		)
-			.bind(linuxdoId, now, userId)
+			.bind(linuxdoId, linuxdoUser.username, now, userId)
 			.run();
 
 		// Clear cookies and redirect to user dashboard
@@ -457,9 +458,9 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 		}
 
 		await c.env.DB.prepare(
-			"INSERT INTO users (id, email, name, password_hash, role, balance, status, linuxdo_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO users (id, email, name, password_hash, role, balance, status, linuxdo_id, linuxdo_username, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		)
-			.bind(id, email, finalName, passwordHash, "user", defaultBalance, "active", linuxdoId, now, now)
+			.bind(id, email, finalName, passwordHash, "user", defaultBalance, "active", linuxdoId, linuxdoUser.username, now, now)
 			.run();
 
 		user = { id, email, name: finalName, role: "user", balance: defaultBalance, status: "active" };

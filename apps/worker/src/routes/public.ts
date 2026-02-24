@@ -85,4 +85,44 @@ publicRoutes.get("/models", async (c) => {
 	return c.json({ models, site_mode: siteMode });
 });
 
+/**
+ * Public contributions endpoint — only available in shared mode.
+ * Returns contributor leaderboard with linuxdo_id/username for LDC tipping.
+ */
+publicRoutes.get("/contributions", async (c) => {
+	const siteMode = await getSiteMode(c.env.DB);
+	if (siteMode !== "shared") {
+		return c.json({ error: "贡献榜不公开" }, 403);
+	}
+
+	const contribRows = await c.env.DB.prepare(
+		`SELECT
+			u.name AS user_name,
+			u.linuxdo_id,
+			u.linuxdo_username,
+			u.tip_url,
+			COUNT(DISTINCT c.id) AS channel_count,
+			COALESCE(SUM(CASE WHEN ul.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_requests,
+			COALESCE(SUM(ul.total_tokens), 0) AS total_tokens
+		FROM channels c
+		JOIN users u ON c.contributed_by = u.id
+		LEFT JOIN usage_logs ul ON ul.channel_id = c.id
+		WHERE c.contributed_by IS NOT NULL AND c.status = 'active'
+		GROUP BY u.id, u.name, u.linuxdo_id, u.linuxdo_username, u.tip_url
+		ORDER BY total_requests DESC`,
+	).all();
+
+	const contributions = (contribRows.results ?? []).map((row) => ({
+		user_name: String(row.user_name),
+		linuxdo_id: row.linuxdo_id ? String(row.linuxdo_id) : null,
+		linuxdo_username: row.linuxdo_username ? String(row.linuxdo_username) : null,
+		tip_url: row.tip_url ? String(row.tip_url) : null,
+		channel_count: Number(row.channel_count),
+		total_requests: Number(row.total_requests),
+		total_tokens: Number(row.total_tokens),
+	}));
+
+	return c.json({ contributions });
+});
+
 export default publicRoutes;
