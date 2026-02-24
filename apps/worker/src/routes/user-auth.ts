@@ -461,6 +461,12 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 		if (user.status !== "active") {
 			return redirectWithError(c, "user_disabled");
 		}
+		// Backfill linuxdo_username if missing or changed
+		await c.env.DB.prepare(
+			"UPDATE users SET linuxdo_username = ?, updated_at = ? WHERE id = ? AND (linuxdo_username IS NULL OR linuxdo_username != ?)",
+		)
+			.bind(linuxdoUser.username, nowIso(), user.id, linuxdoUser.username)
+			.run();
 	} else {
 		// New user — create account
 		const siteMode = await getSiteMode(c.env.DB);
