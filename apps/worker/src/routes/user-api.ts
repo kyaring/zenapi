@@ -4,7 +4,7 @@ import type { UserRecord } from "../middleware/userAuth";
 import { userAuth } from "../middleware/userAuth";
 import { extractModelPricings, extractSharedModelPricings } from "../services/channel-models";
 import { listActiveChannels } from "../services/channel-repo";
-import { loadPrimaryNameMap } from "../services/model-aliases";
+import { loadPrimaryNameMap, loadAliasOnlySet, loadAliasMap, loadAllChannelAliasMap, loadChannelAliasOnlyMap, loadChannelPrimaryNameMap } from "../services/model-aliases";
 import { getSiteMode } from "../services/settings";
 import { generateToken, sha256Hex } from "../utils/crypto";
 import { jsonError } from "../utils/http";
@@ -54,6 +54,9 @@ userApi.get("/models", async (c) => {
 		}>
 	>();
 
+	// Build model→channels map with per-channel info for alias_only checking
+	const modelChannelIds = new Map<string, string[]>();
+
 	for (const channel of channels) {
 		const pricings = siteMode === "shared"
 			? extractSharedModelPricings(channel)
@@ -76,16 +79,69 @@ userApi.get("/models", async (c) => {
 				});
 			}
 			modelMap.set(p.id, existing);
+
+			// Track which channels provide each model (for alias_only check)
+			const chIds = modelChannelIds.get(p.id) ?? [];
+			chIds.push(channel.id);
+			modelChannelIds.set(p.id, chIds);
 		}
 	}
 
+	// Load alias data from both global and per-channel tables
 	const primaryNames = await loadPrimaryNameMap(c.env.DB);
+	const channelPrimaryNames = await loadChannelPrimaryNameMap(c.env.DB);
+	const globalAliasOnlySet = await loadAliasOnlySet(c.env.DB);
+	const channelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
+	const globalAliasMap = await loadAliasMap(c.env.DB);
+	const channelAliasMap = await loadAllChannelAliasMap(c.env.DB);
 
-	const models = Array.from(modelMap.entries()).map(([id, chs]) => ({
-		id,
-		display_name: primaryNames.get(id) ?? id,
-		channels: chs,
-	}));
+	const modelIdSet = new Set(modelMap.keys());
+	const models: Array<{ id: string; display_name: string; channels: typeof modelMap extends Map<string, infer V> ? V : never }> = [];
+
+	// Add original model entries, hiding alias-only models
+	for (const [id, chs] of modelMap) {
+		// Global alias-only → always hide
+		if (globalAliasOnlySet.has(id)) continue;
+
+		// Per-channel alias-only → hide if ALL providing channels have alias_only
+		const providers = modelChannelIds.get(id) ?? [];
+		if (providers.length > 0) {
+			const allAliasOnly = providers.every((chId) => {
+				const aoModels = channelAliasOnlyMap.get(chId);
+				return aoModels?.has(id) ?? false;
+			});
+			if (allAliasOnly) continue;
+		}
+
+		// display_name: global primary > per-channel primary > model_id
+		const displayName = primaryNames.get(id) ?? channelPrimaryNames.get(id) ?? id;
+		models.push({ id, display_name: displayName, channels: chs });
+	}
+
+	// Add global alias entries (aliases that point to models in the list)
+	const listedIds = new Set(models.map((m) => m.id));
+	for (const [alias, targetModelId] of globalAliasMap) {
+		if (modelIdSet.has(targetModelId) && !listedIds.has(alias)) {
+			models.push({
+				id: alias,
+				display_name: alias,
+				channels: modelMap.get(targetModelId) ?? [],
+			});
+			listedIds.add(alias);
+		}
+	}
+
+	// Add per-channel alias entries
+	for (const [alias, targetModelId] of channelAliasMap) {
+		if (modelIdSet.has(targetModelId) && !listedIds.has(alias)) {
+			models.push({
+				id: alias,
+				display_name: alias,
+				channels: modelMap.get(targetModelId) ?? [],
+			});
+			listedIds.add(alias);
+		}
+	}
 
 	return c.json({ models, site_mode: siteMode });
 });

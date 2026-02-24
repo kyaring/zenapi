@@ -251,6 +251,26 @@ export async function loadAllChannelAliasMap(
 }
 
 /**
+ * Returns a map of model_id → primary alias name from per-channel aliases.
+ * If multiple channels set different primaries for the same model, takes the first.
+ * Used by model list endpoints to determine display names.
+ */
+export async function loadChannelPrimaryNameMap(
+	db: D1Database,
+): Promise<Map<string, string>> {
+	const result = await db
+		.prepare("SELECT model_id, alias FROM channel_model_aliases WHERE is_primary = 1")
+		.all<{ model_id: string; alias: string }>();
+	const map = new Map<string, string>();
+	for (const row of result.results ?? []) {
+		if (!map.has(row.model_id)) {
+			map.set(row.model_id, row.alias);
+		}
+	}
+	return map;
+}
+
+/**
  * Returns a map of channelId → Set<modelId> for models with alias_only=1.
  * Used by the proxy to check per-channel alias_only status.
  */

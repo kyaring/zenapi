@@ -98,8 +98,8 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 		candidates = [targetChannel];
 	} else {
 		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
-		// Load per-channel alias-only map for filtering
-		const perChannelAliasOnlyMap = channelAliasHitMap.size > 0 ? await loadChannelAliasOnlyMap(c.env.DB) : new Map<string, Set<string>>();
+		// Load per-channel alias-only map for filtering (always needed, not just when alias hits exist)
+		const perChannelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
 		if (resolvedNames.length > 0) {
 			const supportsFn = useSharedFilter
 				? channelSupportsAnySharedModel

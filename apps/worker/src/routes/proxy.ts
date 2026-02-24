@@ -9,6 +9,8 @@ import {
 import {
 	collectUniqueModelIds,
 	collectUniqueSharedModelIds,
+	extractModelIds,
+	extractSharedModelPricings,
 	extractSharedModels,
 } from "../services/channel-models";
 import {
@@ -251,15 +253,41 @@ proxy.get("/models", tokenAuth, async (c) => {
 		? collectUniqueSharedModelIds(allowed)
 		: collectUniqueModelIds(allowed);
 
+	// Build model→channel mapping for per-channel alias_only check
+	const modelToChannelIds = new Map<string, string[]>();
+	for (const ch of allowed) {
+		const chModelIds = useSharedFilter
+			? extractSharedModelPricings(ch).filter((m) => m.enabled !== false).map((m) => m.id)
+			: extractModelIds(ch);
+		for (const mid of chModelIds) {
+			const arr = modelToChannelIds.get(mid) ?? [];
+			arr.push(ch.id);
+			modelToChannelIds.set(mid, arr);
+		}
+	}
+
 	const now = Math.floor(Date.now() / 1000);
 	const modelData: Array<{ id: string; object: string; created: number; owned_by: string }> = [];
 
-	// Load alias-only set to hide original names
+	// Load alias-only sets (global + per-channel)
 	const aliasOnlySet = await loadAliasOnlySet(c.env.DB);
+	const channelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
+
 	for (const id of modelIds) {
-		if (!aliasOnlySet.has(id)) {
-			modelData.push({ id, object: "model", created: now, owned_by: "system" });
+		// Global alias-only → always hide
+		if (aliasOnlySet.has(id)) continue;
+
+		// Per-channel alias-only → hide if ALL providing channels have alias_only
+		const providers = modelToChannelIds.get(id) ?? [];
+		if (providers.length > 0) {
+			const allAliasOnly = providers.every((chId) => {
+				const aoModels = channelAliasOnlyMap.get(chId);
+				return aoModels?.has(id) ?? false;
+			});
+			if (allAliasOnly) continue;
 		}
+
+		modelData.push({ id, object: "model", created: now, owned_by: "system" });
 	}
 
 	// Add aliases that point to models in the list
@@ -388,8 +416,8 @@ proxy.all("/*", tokenAuth, async (c) => {
 		candidates = [targetChannel];
 	} else {
 		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
-		// Load per-channel alias-only map for filtering
-		const perChannelAliasOnlyMap = channelAliasHitMap.size > 0 ? await loadChannelAliasOnlyMap(c.env.DB) : new Map<string, Set<string>>();
+		// Load per-channel alias-only map for filtering (always needed, not just when alias hits exist)
+		const perChannelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
 		if (resolvedNames.length > 0) {
 			const supportsFn = useSharedFilter
 				? channelSupportsAnySharedModel
