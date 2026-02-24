@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS channels (
   api_format TEXT NOT NULL DEFAULT 'openai',
   custom_headers_json TEXT,
   contributed_by TEXT,
-  tip_url TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -81,6 +80,7 @@ CREATE TABLE IF NOT EXISTS users (
   balance REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   linuxdo_id TEXT,
+  tip_url TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

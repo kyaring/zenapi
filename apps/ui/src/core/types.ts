@@ -221,11 +221,11 @@ export type User = {
 	created_at: string;
 	updated_at: string;
 	linuxdo_id?: string | null;
+	tip_url?: string | null;
 };
 
 export type ContributionChannel = {
 	name: string;
-	tip_url: string | null;
 	requests: number;
 	total_tokens: number;
 };
@@ -233,6 +233,7 @@ export type ContributionChannel = {
 export type ContributionEntry = {
 	user_name: string;
 	linuxdo_id: string | null;
+	tip_url: string | null;
 	channel_count: number;
 	channels: ContributionChannel[];
 	total_requests: number;

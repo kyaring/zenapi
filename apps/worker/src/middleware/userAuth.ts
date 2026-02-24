@@ -12,6 +12,7 @@ export type UserRecord = {
 	balance: number;
 	status: string;
 	linuxdo_id?: string;
+	tip_url?: string;
 };
 
 /**
@@ -42,7 +43,7 @@ export const userAuth = createMiddleware<AppEnv>(async (c, next) => {
 	}
 
 	const user = await c.env.DB.prepare(
-		"SELECT id, email, name, role, balance, status, linuxdo_id FROM users WHERE id = ?",
+		"SELECT id, email, name, role, balance, status, linuxdo_id, tip_url FROM users WHERE id = ?",
 	)
 		.bind(session.user_id)
 		.first<UserRecord>();

@@ -1,12 +1,15 @@
-import { useState } from "hono/jsx/dom";
+import { useCallback, useMemo, useState } from "hono/jsx/dom";
+import { createApiFetch } from "../core/api";
 import type { ContributionEntry, User, UserDashboardData } from "../core/types";
 
 type UserDashboardProps = {
 	data: UserDashboardData | null;
 	user: User;
 	token: string;
+	updateToken: (next: string | null) => void;
 	linuxdoEnabled: boolean;
 	onUnbind: () => void;
+	onUserRefresh: () => void;
 };
 
 function formatCost(n: number): string {
@@ -56,6 +59,17 @@ const ContributionBoard = ({ contributions }: { contributions: ContributionEntry
 											{entry.linuxdo_id && (
 												<span class="ml-1.5 text-xs text-stone-400">L{entry.linuxdo_id}</span>
 											)}
+											{entry.tip_url && (
+												<a
+													href={entry.tip_url}
+													target="_blank"
+													rel="noopener noreferrer"
+													class="ml-1.5 inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-xs text-amber-600 hover:bg-amber-100"
+													onClick={(e) => e.stopPropagation()}
+												>
+													打赏
+												</a>
+											)}
 										</td>
 										<td class="py-2.5 pr-4 text-right text-stone-600">{entry.channel_count}</td>
 										<td class="py-2.5 pr-4 text-right font-['Space_Grotesk'] text-stone-600">
@@ -82,17 +96,6 @@ const ContributionBoard = ({ contributions }: { contributions: ContributionEntry
 																<tr key={ch.name} class="border-t border-stone-100">
 																	<td class="py-1 text-stone-600">
 																		{ch.name}
-																		{ch.tip_url && (
-																			<a
-																				href={ch.tip_url}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				class="ml-1.5 inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-xs text-amber-600 hover:bg-amber-100"
-																				onClick={(e) => e.stopPropagation()}
-																			>
-																				打赏
-																			</a>
-																		)}
 																	</td>
 																	<td class="py-1 text-right font-['Space_Grotesk'] text-stone-500">
 																		{formatNumber(ch.requests)}
@@ -118,7 +121,28 @@ const ContributionBoard = ({ contributions }: { contributions: ContributionEntry
 	);
 };
 
-export const UserDashboard = ({ data, user, token, linuxdoEnabled, onUnbind }: UserDashboardProps) => {
+export const UserDashboard = ({ data, user, token, updateToken, linuxdoEnabled, onUnbind, onUserRefresh }: UserDashboardProps) => {
+	const [tipUrl, setTipUrl] = useState(user.tip_url ?? "");
+	const [profileNotice, setProfileNotice] = useState("");
+
+	const apiFetch = useMemo(
+		() => createApiFetch(token, () => updateToken(null)),
+		[token, updateToken],
+	);
+
+	const handleSaveTipUrl = useCallback(async () => {
+		try {
+			await apiFetch("/api/u/profile", {
+				method: "PATCH",
+				body: JSON.stringify({ tip_url: tipUrl.trim() }),
+			});
+			setProfileNotice("打赏链接已保存");
+			onUserRefresh();
+		} catch (error) {
+			setProfileNotice((error as Error).message);
+		}
+	}, [apiFetch, tipUrl, onUserRefresh]);
+
 	if (!data) {
 		return (
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -162,6 +186,39 @@ export const UserDashboard = ({ data, user, token, linuxdoEnabled, onUnbind }: U
 					<p class="mt-1 font-['Space_Grotesk'] text-2xl font-semibold text-stone-900">
 						{formatCost(data.total_cost)}
 					</p>
+				</div>
+			</div>
+
+			{/* Profile settings */}
+			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+				<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
+					个人设置
+				</h3>
+				{profileNotice && (
+					<div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+						{profileNotice}
+					</div>
+				)}
+				<div class="flex items-end gap-3">
+					<div class="flex-1">
+						<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
+							打赏链接（选填，显示在贡献榜）
+						</label>
+						<input
+							class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+							type="url"
+							placeholder="https://example.com/tip"
+							value={tipUrl}
+							onInput={(e) => setTipUrl((e.currentTarget as HTMLInputElement)?.value ?? "")}
+						/>
+					</div>
+					<button
+						type="button"
+						class="h-[42px] rounded-lg bg-stone-900 px-4 text-sm font-semibold text-white transition-all hover:shadow-lg"
+						onClick={handleSaveTipUrl}
+					>
+						保存
+					</button>
 				</div>
 			</div>
 

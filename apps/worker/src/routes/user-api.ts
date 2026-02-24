@@ -16,6 +16,28 @@ const userApi = new Hono<AppEnv>();
 userApi.use("/*", userAuth);
 
 /**
+ * Updates the current user's profile (tip_url).
+ */
+userApi.patch("/profile", async (c) => {
+	const userId = c.get("userId") as string;
+	const body = await c.req.json().catch(() => null);
+	if (!body) {
+		return jsonError(c, 400, "missing_body", "missing_body");
+	}
+
+	if (body.tip_url !== undefined) {
+		const tipUrl = String(body.tip_url).trim() || null;
+		await c.env.DB.prepare(
+			"UPDATE users SET tip_url = ?, updated_at = ? WHERE id = ?",
+		)
+			.bind(tipUrl, nowIso(), userId)
+			.run();
+	}
+
+	return c.json({ ok: true });
+});
+
+/**
  * Returns models visible to users (with pricing info for service mode).
  */
 userApi.get("/models", async (c) => {
@@ -210,6 +232,7 @@ userApi.get("/dashboard", async (c) => {
 	let contributions: Array<{
 		user_name: string;
 		linuxdo_id: string | null;
+		tip_url: string | null;
 		channel_count: number;
 		channels: Array<{ name: string; requests: number; total_tokens: number }>;
 		total_requests: number;
@@ -222,6 +245,7 @@ userApi.get("/dashboard", async (c) => {
 				u.id AS user_id,
 				u.name AS user_name,
 				u.linuxdo_id,
+				u.tip_url,
 				COUNT(DISTINCT c.id) AS channel_count,
 				COALESCE(SUM(CASE WHEN ul.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_requests,
 				COALESCE(SUM(ul.total_tokens), 0) AS total_tokens
@@ -229,25 +253,24 @@ userApi.get("/dashboard", async (c) => {
 			JOIN users u ON c.contributed_by = u.id
 			LEFT JOIN usage_logs ul ON ul.channel_id = c.id
 			WHERE c.contributed_by IS NOT NULL AND c.status = 'active'
-			GROUP BY u.id, u.name, u.linuxdo_id
+			GROUP BY u.id, u.name, u.linuxdo_id, u.tip_url
 			ORDER BY total_requests DESC`,
 		).all();
 
 		const contributorIds = (contribRows.results ?? []).map((r) => String(r.user_id));
 
-		let channelDetailMap = new Map<string, Array<{ name: string; tip_url: string | null; requests: number; total_tokens: number }>>();
+		let channelDetailMap = new Map<string, Array<{ name: string; requests: number; total_tokens: number }>>();
 		if (contributorIds.length > 0) {
 			const channelRows = await c.env.DB.prepare(
 				`SELECT
 					c.contributed_by,
 					c.name,
-					c.tip_url,
 					COALESCE(SUM(CASE WHEN ul.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS requests,
 					COALESCE(SUM(ul.total_tokens), 0) AS total_tokens
 				FROM channels c
 				LEFT JOIN usage_logs ul ON ul.channel_id = c.id
 				WHERE c.contributed_by IS NOT NULL AND c.status = 'active'
-				GROUP BY c.id, c.contributed_by, c.name, c.tip_url
+				GROUP BY c.id, c.contributed_by, c.name
 				ORDER BY requests DESC`,
 			).all();
 
@@ -256,7 +279,6 @@ userApi.get("/dashboard", async (c) => {
 				const arr = channelDetailMap.get(uid) ?? [];
 				arr.push({
 					name: String(row.name),
-					tip_url: row.tip_url ? String(row.tip_url) : null,
 					requests: Number(row.requests),
 					total_tokens: Number(row.total_tokens),
 				});
@@ -267,6 +289,7 @@ userApi.get("/dashboard", async (c) => {
 		contributions = (contribRows.results ?? []).map((row) => ({
 			user_name: String(row.user_name),
 			linuxdo_id: row.linuxdo_id ? String(row.linuxdo_id) : null,
+			tip_url: row.tip_url ? String(row.tip_url) : null,
 			channel_count: Number(row.channel_count),
 			channels: channelDetailMap.get(String(row.user_id)) ?? [],
 			total_requests: Number(row.total_requests),

@@ -1,2 +1,2 @@
--- Add tip_url column to channels for contributor donation links
-ALTER TABLE channels ADD COLUMN tip_url TEXT;
+-- Move tip_url from channels to users table
+ALTER TABLE users ADD COLUMN tip_url TEXT;

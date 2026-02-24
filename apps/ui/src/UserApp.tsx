@@ -24,7 +24,6 @@ type ChannelItem = {
 	models_json?: string;
 	api_format: string;
 	status: string;
-	tip_url?: string;
 	created_at: string;
 };
 
@@ -281,7 +280,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 			);
 		}
 		if (activeTab === "dashboard") {
-			return <UserDashboard data={dashboardData} user={user} token={token} linuxdoEnabled={linuxdoEnabled} onUnbind={handleLinuxdoUnbind} />;
+			return <UserDashboard data={dashboardData} user={user} token={token} updateToken={updateToken} linuxdoEnabled={linuxdoEnabled} onUnbind={handleLinuxdoUnbind} onUserRefresh={onUserRefresh} />;
 		}
 		if (activeTab === "models") {
 			return <UserModelsView models={models} siteMode={siteMode} />;

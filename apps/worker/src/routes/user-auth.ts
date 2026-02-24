@@ -165,6 +165,7 @@ userAuthRoutes.get("/me", userAuth, async (c) => {
 			balance: user.balance,
 			status: user.status,
 			linuxdo_id: user.linuxdo_id ?? null,
+			tip_url: user.tip_url ?? null,
 		},
 	});
 });
