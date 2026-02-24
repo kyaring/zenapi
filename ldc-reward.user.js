@@ -5,7 +5,8 @@
 // @description  为 Linux.do 社区帖子添加 LDC 打赏功能，支持 ZenAPI 贡献榜打赏
 // @author       @tbphp
 // @match        https://linux.do/*
-// @match        http://zenapi.top/*
+// @match        https://zenapi.top/*
+// @match        https://api-worker.metayuandao.workers.dev/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
