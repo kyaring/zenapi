@@ -170,3 +170,101 @@ export async function deleteAliasesForModel(
 		.bind(modelId)
 		.run();
 }
+
+// ---------------------------------------------------------------------------
+// Per-channel alias functions (channel_model_aliases table)
+// ---------------------------------------------------------------------------
+
+/**
+ * Replaces all per-channel aliases for a specific channel + model pair.
+ * Uses batch delete + insert for atomicity.
+ */
+export async function saveChannelAliases(
+	db: D1Database,
+	channelId: string,
+	modelId: string,
+	aliases: AliasInput[],
+	aliasOnly = false,
+): Promise<void> {
+	const now = nowIso();
+	const deleteStmt = db
+		.prepare("DELETE FROM channel_model_aliases WHERE channel_id = ? AND model_id = ?")
+		.bind(channelId, modelId);
+
+	const insertStmts = aliases.map((a) =>
+		db
+			.prepare(
+				"INSERT INTO channel_model_aliases (id, channel_id, model_id, alias, is_primary, alias_only, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			)
+			.bind(
+				crypto.randomUUID(),
+				channelId,
+				modelId,
+				a.alias,
+				a.is_primary ? 1 : 0,
+				aliasOnly ? 1 : 0,
+				now,
+				now,
+			),
+	);
+
+	await db.batch([deleteStmt, ...insertStmts]);
+}
+
+/**
+ * Returns per-channel alias hits for a given alias name.
+ * Used by the proxy to find channels that have a per-channel alias for a model.
+ */
+export async function loadChannelAliasesByAlias(
+	db: D1Database,
+	alias: string,
+): Promise<Array<{ channel_id: string; model_id: string; alias_only: boolean }>> {
+	const result = await db
+		.prepare("SELECT channel_id, model_id, alias_only FROM channel_model_aliases WHERE alias = ?")
+		.bind(alias)
+		.all<{ channel_id: string; model_id: string; alias_only: number }>();
+	return (result.results ?? []).map((r) => ({
+		channel_id: r.channel_id,
+		model_id: r.model_id,
+		alias_only: r.alias_only === 1,
+	}));
+}
+
+/**
+ * Returns a map of alias → model_id across all channels.
+ * Used by the /v1/models endpoint to list per-channel aliases.
+ */
+export async function loadAllChannelAliasMap(
+	db: D1Database,
+): Promise<Map<string, string>> {
+	const result = await db
+		.prepare("SELECT alias, model_id FROM channel_model_aliases")
+		.all<{ alias: string; model_id: string }>();
+	const map = new Map<string, string>();
+	for (const row of result.results ?? []) {
+		// First one wins (multiple channels may alias the same name)
+		if (!map.has(row.alias)) {
+			map.set(row.alias, row.model_id);
+		}
+	}
+	return map;
+}
+
+/**
+ * Returns a map of channelId → Set<modelId> for models with alias_only=1.
+ * Used by the proxy to check per-channel alias_only status.
+ */
+export async function loadChannelAliasOnlyMap(
+	db: D1Database,
+): Promise<Map<string, Set<string>>> {
+	const result = await db
+		.prepare("SELECT DISTINCT channel_id, model_id FROM channel_model_aliases WHERE alias_only = 1")
+		.all<{ channel_id: string; model_id: string }>();
+	const map = new Map<string, Set<string>>();
+	for (const row of result.results ?? []) {
+		const existing = map.get(row.channel_id) ?? new Set<string>();
+		existing.add(row.model_id);
+		map.set(row.channel_id, existing);
+	}
+	return map;
+}

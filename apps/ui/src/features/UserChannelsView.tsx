@@ -56,7 +56,7 @@ type UserChannelsViewProps = {
 	token: string;
 	updateToken: (next: string | null) => void;
 	channels: ChannelItem[];
-	modelAliases: ModelAliasesMap;
+	channelAliases: Record<string, ModelAliasesMap>;
 	onRefresh: () => Promise<void>;
 };
 
@@ -64,7 +64,7 @@ export const UserChannelsView = ({
 	token,
 	updateToken,
 	channels,
-	modelAliases,
+	channelAliases,
 	onRefresh,
 }: UserChannelsViewProps) => {
 	const [showModal, setShowModal] = useState(false);
@@ -99,17 +99,18 @@ export const UserChannelsView = ({
 			api_format: (ch.api_format ?? "openai") as ChannelApiFormat,
 			models: parseModelsJsonToText(ch.models_json),
 		});
-		// Initialize alias state from modelAliases for this channel's models
+		// Initialize alias state from per-channel aliases for this channel
+		const perChannelMap = channelAliases[ch.id] ?? {};
 		const models = parseModelsJsonToText(ch.models_json)
 			.split("\n")
 			.map((l) => l.trim())
 			.filter(Boolean);
 		const initial: Record<string, ModelAliasConfig> = {};
 		for (const m of models) {
-			if (modelAliases[m]) {
+			if (perChannelMap[m]) {
 				initial[m] = {
-					aliases: modelAliases[m].aliases.map((a) => ({ ...a })),
-					alias_only: modelAliases[m].alias_only,
+					aliases: perChannelMap[m].aliases.map((a) => ({ ...a })),
+					alias_only: perChannelMap[m].alias_only,
 				};
 			}
 		}
@@ -117,7 +118,7 @@ export const UserChannelsView = ({
 		setExpandedModels(new Set());
 		setShowModal(true);
 		setNotice("");
-	}, [modelAliases]);
+	}, [channelAliases]);
 
 	const closeModal = useCallback(() => {
 		setShowModal(false);

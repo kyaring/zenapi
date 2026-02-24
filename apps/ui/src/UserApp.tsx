@@ -76,7 +76,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		useState<UserDashboardData | null>(null);
 	const [models, setModels] = useState<PublicModelItem[]>([]);
 	const [channels, setChannels] = useState<ChannelItem[]>([]);
-	const [modelAliases, setModelAliases] = useState<ModelAliasesMap>({});
+	const [channelAliases, setChannelAliases] = useState<Record<string, ModelAliasesMap>>({});
 	const [tokens, setTokens] = useState<Token[]>([]);
 	const [usage, setUsage] = useState<UsageLog[]>([]);
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -135,9 +135,9 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 	}, [apiFetch]);
 
 	const loadChannels = useCallback(async () => {
-		const result = await apiFetch<{ channels: ChannelItem[]; model_aliases?: ModelAliasesMap }>("/api/u/channels");
+		const result = await apiFetch<{ channels: ChannelItem[]; channel_aliases?: Record<string, ModelAliasesMap> }>("/api/u/channels");
 		setChannels(result.channels);
-		setModelAliases(result.model_aliases ?? {});
+		setChannelAliases(result.channel_aliases ?? {});
 	}, [apiFetch]);
 
 	const loadedTabs = useRef<Set<string>>(new Set<string>());
@@ -300,7 +300,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		}
 		if (activeTab === "channels") {
 			return (
-				<UserChannelsView token={token} updateToken={updateToken} channels={channels} modelAliases={modelAliases} onRefresh={loadChannels} />
+				<UserChannelsView token={token} updateToken={updateToken} channels={channels} channelAliases={channelAliases} onRefresh={loadChannels} />
 			);
 		}
 		return null;

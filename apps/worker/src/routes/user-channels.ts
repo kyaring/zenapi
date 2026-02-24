@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { userAuth } from "../middleware/userAuth";
-import { saveAliasesForModel } from "../services/model-aliases";
+import { saveChannelAliases } from "../services/model-aliases";
 import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
@@ -34,57 +34,42 @@ userChannels.get("/", async (c) => {
 
 	const channels = result.results ?? [];
 
-	// Collect all model IDs across user's channels
-	const allModelIds = new Set<string>();
-	for (const ch of channels) {
-		const modelsJson = ch.models_json as string | null;
-		if (!modelsJson) continue;
-		try {
-			const parsed = JSON.parse(modelsJson);
-			const arr = Array.isArray(parsed)
-				? parsed
-				: Array.isArray(parsed?.data)
-					? parsed.data
-					: [];
-			for (const m of arr) {
-				const id = typeof m === "string" ? m : m?.id;
-				if (id) allModelIds.add(id);
-			}
-		} catch {
-			// skip malformed JSON
-		}
-	}
+	// Collect channel IDs for per-channel alias query
+	const channelIds = channels.map((ch) => ch.id as string);
 
-	// Batch-query aliases for all model IDs (D1 limits bind params to 100)
-	const modelAliases: Record<string, AliasConfig> = {};
-	if (allModelIds.size > 0) {
-		const ids = [...allModelIds];
+	// Batch-query per-channel aliases (D1 limits bind params to 100)
+	const channelAliases: Record<string, Record<string, AliasConfig>> = {};
+	if (channelIds.length > 0) {
 		const BATCH_SIZE = 80;
-		for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-			const batch = ids.slice(i, i + BATCH_SIZE);
+		for (let i = 0; i < channelIds.length; i += BATCH_SIZE) {
+			const batch = channelIds.slice(i, i + BATCH_SIZE);
 			const placeholders = batch.map(() => "?").join(",");
 			const aliasRows = await c.env.DB.prepare(
-				`SELECT model_id, alias, is_primary, alias_only FROM model_aliases WHERE model_id IN (${placeholders}) ORDER BY model_id, is_primary DESC, alias`,
+				`SELECT channel_id, model_id, alias, is_primary, alias_only FROM channel_model_aliases WHERE channel_id IN (${placeholders}) ORDER BY channel_id, model_id, is_primary DESC, alias`,
 			)
 				.bind(...batch)
-				.all<{ model_id: string; alias: string; is_primary: number; alias_only: number }>();
+				.all<{ channel_id: string; model_id: string; alias: string; is_primary: number; alias_only: number }>();
 
 			for (const row of aliasRows.results ?? []) {
-				if (!modelAliases[row.model_id]) {
-					modelAliases[row.model_id] = { aliases: [], alias_only: false };
+				if (!channelAliases[row.channel_id]) {
+					channelAliases[row.channel_id] = {};
 				}
-				modelAliases[row.model_id].aliases.push({
+				const chMap = channelAliases[row.channel_id];
+				if (!chMap[row.model_id]) {
+					chMap[row.model_id] = { aliases: [], alias_only: false };
+				}
+				chMap[row.model_id].aliases.push({
 					alias: row.alias,
 					is_primary: row.is_primary === 1,
 				});
 				if (row.alias_only === 1) {
-					modelAliases[row.model_id].alias_only = true;
+					chMap[row.model_id].alias_only = true;
 				}
 			}
 		}
 	}
 
-	return c.json({ channels, model_aliases: modelAliases });
+	return c.json({ channels, channel_aliases: channelAliases });
 });
 
 /**
@@ -129,7 +114,7 @@ userChannels.post("/", async (c) => {
 		)
 		.run();
 
-	// Save model aliases if provided
+	// Save per-channel model aliases if provided
 	if (body.model_aliases && typeof body.model_aliases === "object") {
 		const modelIds = modelsJson
 			? (JSON.parse(modelsJson) as Array<{ id?: string } | string>).map(
@@ -140,8 +125,9 @@ userChannels.post("/", async (c) => {
 			if (!modelIds.includes(modelId)) continue;
 			const cfg = config as AliasConfig;
 			if (cfg.aliases && cfg.aliases.length > 0) {
-				await saveAliasesForModel(
+				await saveChannelAliases(
 					c.env.DB,
+					id,
 					modelId,
 					cfg.aliases.map((a) => ({ alias: a.alias, is_primary: a.is_primary })),
 					cfg.alias_only ?? false,
@@ -201,7 +187,7 @@ userChannels.patch("/:id", async (c) => {
 		)
 		.run();
 
-	// Save model aliases if provided
+	// Save per-channel model aliases if provided
 	if (body.model_aliases && typeof body.model_aliases === "object") {
 		const modelIds = modelsJson
 			? (JSON.parse(modelsJson) as Array<{ id?: string } | string>).map(
@@ -211,8 +197,9 @@ userChannels.patch("/:id", async (c) => {
 		for (const [modelId, config] of Object.entries(body.model_aliases)) {
 			if (!modelIds.includes(modelId)) continue;
 			const cfg = config as AliasConfig;
-			await saveAliasesForModel(
+			await saveChannelAliases(
 				c.env.DB,
+				channelId,
 				modelId,
 				cfg.aliases?.map((a) => ({ alias: a.alias, is_primary: a.is_primary })) ?? [],
 				cfg.alias_only ?? false,

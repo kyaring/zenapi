@@ -94,7 +94,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		...initialChannelForm,
 	}));
 	const [isChannelModalOpen, setChannelModalOpen] = useState(false);
-	const [channelModelAliases, setChannelModelAliases] = useState<ModelAliasesMap>({});
+	const [channelModelAliases, setChannelModelAliases] = useState<Record<string, ModelAliasesMap>>({});
 	const [channelAliasState, setChannelAliasState] = useState<ModelAliasesMap>({});
 	const [isTokenModalOpen, setTokenModalOpen] = useState(false);
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -118,9 +118,9 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	}, [apiFetch]);
 
 	const loadChannels = useCallback(async () => {
-		const result = await apiFetch<{ channels: Channel[]; model_aliases?: ModelAliasesMap }>("/api/channels");
+		const result = await apiFetch<{ channels: Channel[]; channel_aliases?: Record<string, ModelAliasesMap> }>("/api/channels");
 		setData((prev) => ({ ...prev, channels: result.channels }));
-		setChannelModelAliases(result.model_aliases ?? {});
+		setChannelModelAliases(result.channel_aliases ?? {});
 	}, [apiFetch]);
 
 	const loadModels = useCallback(async () => {
@@ -330,13 +330,14 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 			custom_headers: channel.custom_headers_json ?? "",
 			models: modelsList,
 		});
-		// Initialize alias state from global alias map for this channel's models
+		// Initialize alias state from per-channel alias map for this channel's models
+		const perChannelMap = channelModelAliases[channel.id] ?? {};
 		const initial: ModelAliasesMap = {};
 		for (const mid of modelIds) {
-			if (channelModelAliases[mid]) {
+			if (perChannelMap[mid]) {
 				initial[mid] = {
-					aliases: channelModelAliases[mid].aliases.map((a) => ({ ...a })),
-					alias_only: channelModelAliases[mid].alias_only,
+					aliases: perChannelMap[mid].aliases.map((a) => ({ ...a })),
+					alias_only: perChannelMap[mid].alias_only,
 				};
 			}
 		}

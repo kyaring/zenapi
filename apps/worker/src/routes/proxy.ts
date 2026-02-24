@@ -25,7 +25,7 @@ import { extractReasoningEffort } from "../utils/reasoning";
 import { parseApiKeys, shuffleArray } from "../utils/keys";
 import { isRetryableStatus, sleep } from "../utils/retry";
 import { resolveChannelRoute } from "../services/channel-route";
-import { resolveModelNames, loadAliasMap, loadAliasOnlySet } from "../services/model-aliases";
+import { resolveModelNames, loadAliasMap, loadAliasOnlySet, loadAllChannelAliasMap, loadChannelAliasesByAlias, loadChannelAliasOnlyMap } from "../services/model-aliases";
 import { cfSafeUrl, normalizeBaseUrl } from "../utils/url";
 import {
 	type NormalizedUsage,
@@ -276,6 +276,21 @@ proxy.get("/models", tokenAuth, async (c) => {
 		}
 	}
 
+	// Add per-channel aliases that point to models in the list
+	const channelAliasMap = await loadAllChannelAliasMap(c.env.DB);
+	const listedIds = new Set(modelData.map((m) => m.id));
+	for (const [alias, targetModelId] of channelAliasMap) {
+		if (modelIdSet.has(targetModelId) && !listedIds.has(alias)) {
+			modelData.push({
+				id: alias,
+				object: "model",
+				created: now,
+				owned_by: "system",
+			});
+			listedIds.add(alias);
+		}
+	}
+
 	return c.json({
 		object: "list",
 		data: modelData,
@@ -301,10 +316,15 @@ proxy.all("/*", tokenAuth, async (c) => {
 	// Resolve model aliases — returns all model IDs this name can route to
 	const resolvedNames = model ? await resolveModelNames(c.env.DB, model) : [];
 
+	// Resolve per-channel aliases for this model name
+	const channelAliasHits = model ? await loadChannelAliasesByAlias(c.env.DB, model) : [];
+	const channelAliasHitMap = new Map(channelAliasHits.map((h) => [h.channel_id, h]));
+
 	// Block requests using the original name of alias-only models
 	// resolvedNames[0] === model (always), resolvedNames[1] === target model_id (if alias found)
 	// If no alias was resolved (length === 1), check if this model_id is alias-only
-	if (model && resolvedNames.length === 1) {
+	// But don't block if per-channel alias hits exist for this name
+	if (model && resolvedNames.length === 1 && channelAliasHits.length === 0) {
 		const aliasOnlySet = await loadAliasOnlySet(c.env.DB);
 		if (aliasOnlySet.has(model)) {
 			return jsonError(c, 404, "model_not_found", `The model '${model}' does not exist or is not available.`);
@@ -368,13 +388,26 @@ proxy.all("/*", tokenAuth, async (c) => {
 		candidates = [targetChannel];
 	} else {
 		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
+		// Load per-channel alias-only map for filtering
+		const perChannelAliasOnlyMap = channelAliasHitMap.size > 0 ? await loadChannelAliasOnlyMap(c.env.DB) : new Map<string, Set<string>>();
 		if (resolvedNames.length > 0) {
 			const supportsFn = useSharedFilter
 				? channelSupportsAnySharedModel
 				: channelSupportsAnyModel;
-			candidates = allowedChannels.filter((channel) =>
-				supportsFn(channel, resolvedNames),
-			);
+			candidates = allowedChannels.filter((channel) => {
+				// Channel matched via per-channel alias
+				if (channelAliasHitMap.has(channel.id)) return true;
+				// Channel matched via global alias — but exclude if per-channel alias_only
+				if (supportsFn(channel, resolvedNames)) {
+					const aliasOnlyModels = perChannelAliasOnlyMap.get(channel.id);
+					if (aliasOnlyModels) {
+						// If ALL resolved names are alias-only on this channel, exclude
+						return !resolvedNames.every((n) => aliasOnlyModels.has(n));
+					}
+					return true;
+				}
+				return false;
+			});
 		} else {
 			// No model specified — all channels qualify
 			const supportsFn = useSharedFilter
@@ -438,11 +471,19 @@ proxy.all("/*", tokenAuth, async (c) => {
 			let channelRequestText = requestText;
 			let channelParsedBody = parsedBody;
 			let channelModelName = effectiveModel;
-			if (!targetChannel && resolvedNames.length > 1 && parsedBody) {
-				channelModelName = findChannelModelName(channel, resolvedNames);
-				if (channelModelName !== model) {
+			if (!targetChannel && parsedBody) {
+				// Check if this channel was matched via per-channel alias
+				const aliasHit = channelAliasHitMap.get(channel.id);
+				if (aliasHit) {
+					channelModelName = aliasHit.model_id;
 					channelParsedBody = { ...parsedBody, model: channelModelName };
 					channelRequestText = JSON.stringify(channelParsedBody);
+				} else if (resolvedNames.length > 1) {
+					channelModelName = findChannelModelName(channel, resolvedNames);
+					if (channelModelName !== model) {
+						channelParsedBody = { ...parsedBody, model: channelModelName };
+						channelRequestText = JSON.stringify(channelParsedBody);
+					}
 				}
 			}
 

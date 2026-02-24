@@ -3,7 +3,7 @@ import type { AppEnv } from "../env";
 import { type TokenRecord, tokenAuth } from "../middleware/tokenAuth";
 import { type ChannelRecord, createWeightedOrder } from "../services/channels";
 import { resolveChannelRoute } from "../services/channel-route";
-import { resolveModelNames, loadAliasOnlySet } from "../services/model-aliases";
+import { resolveModelNames, loadAliasOnlySet, loadChannelAliasesByAlias, loadChannelAliasOnlyMap } from "../services/model-aliases";
 import {
 	anthropicToOpenaiRequest,
 	createOpenaiToAnthropicStreamTransform,
@@ -50,8 +50,13 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 	// Resolve model aliases — returns all model IDs this name can route to
 	const resolvedNames = model ? await resolveModelNames(c.env.DB, model) : [];
 
+	// Resolve per-channel aliases for this model name
+	const channelAliasHits = model ? await loadChannelAliasesByAlias(c.env.DB, model) : [];
+	const channelAliasHitMap = new Map(channelAliasHits.map((h) => [h.channel_id, h]));
+
 	// Block requests using the original name of alias-only models
-	if (model && resolvedNames.length === 1) {
+	// But don't block if per-channel alias hits exist for this name
+	if (model && resolvedNames.length === 1 && channelAliasHits.length === 0) {
 		const aliasOnlySet = await loadAliasOnlySet(c.env.DB);
 		if (aliasOnlySet.has(model)) {
 			return jsonError(c, 404, "model_not_found", `The model '${model}' does not exist or is not available.`);
@@ -93,13 +98,25 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 		candidates = [targetChannel];
 	} else {
 		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
+		// Load per-channel alias-only map for filtering
+		const perChannelAliasOnlyMap = channelAliasHitMap.size > 0 ? await loadChannelAliasOnlyMap(c.env.DB) : new Map<string, Set<string>>();
 		if (resolvedNames.length > 0) {
 			const supportsFn = useSharedFilter
 				? channelSupportsAnySharedModel
 				: channelSupportsAnyModel;
-			candidates = allowedChannels.filter((channel) =>
-				supportsFn(channel, resolvedNames),
-			);
+			candidates = allowedChannels.filter((channel) => {
+				// Channel matched via per-channel alias
+				if (channelAliasHitMap.has(channel.id)) return true;
+				// Channel matched via global alias — but exclude if per-channel alias_only
+				if (supportsFn(channel, resolvedNames)) {
+					const aliasOnlyModels = perChannelAliasOnlyMap.get(channel.id);
+					if (aliasOnlyModels) {
+						return !resolvedNames.every((n) => aliasOnlyModels.has(n));
+					}
+					return true;
+				}
+				return false;
+			});
 		} else {
 			const supportsFn = useSharedFilter
 				? channelSupportsSharedModel
@@ -145,13 +162,24 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			let channelRequestText = effectiveRequestText;
 			let channelOpenaiBody = openaiBody;
 			let channelModelName = effectiveModel;
-			if (!targetChannel && resolvedNames.length > 1 && parsedBody) {
-				channelModelName = findChannelModelName(channel, resolvedNames);
-				if (channelModelName !== model) {
+			if (!targetChannel && parsedBody) {
+				// Check if this channel was matched via per-channel alias
+				const aliasHit = channelAliasHitMap.get(channel.id);
+				if (aliasHit) {
+					channelModelName = aliasHit.model_id;
 					const channelParsedBody = { ...parsedBody, model: channelModelName };
 					channelRequestText = JSON.stringify(channelParsedBody);
 					if (openaiBody) {
 						channelOpenaiBody = { ...openaiBody, model: channelModelName };
+					}
+				} else if (resolvedNames.length > 1) {
+					channelModelName = findChannelModelName(channel, resolvedNames);
+					if (channelModelName !== model) {
+						const channelParsedBody = { ...parsedBody, model: channelModelName };
+						channelRequestText = JSON.stringify(channelParsedBody);
+						if (openaiBody) {
+							channelOpenaiBody = { ...openaiBody, model: channelModelName };
+						}
 					}
 				}
 			}
