@@ -55,27 +55,31 @@ userChannels.get("/", async (c) => {
 		}
 	}
 
-	// Batch-query aliases for all model IDs
+	// Batch-query aliases for all model IDs (D1 limits bind params to 100)
 	const modelAliases: Record<string, AliasConfig> = {};
 	if (allModelIds.size > 0) {
 		const ids = [...allModelIds];
-		const placeholders = ids.map(() => "?").join(",");
-		const aliasRows = await c.env.DB.prepare(
-			`SELECT model_id, alias, is_primary, alias_only FROM model_aliases WHERE model_id IN (${placeholders}) ORDER BY model_id, is_primary DESC, alias`,
-		)
-			.bind(...ids)
-			.all<{ model_id: string; alias: string; is_primary: number; alias_only: number }>();
+		const BATCH_SIZE = 80;
+		for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+			const batch = ids.slice(i, i + BATCH_SIZE);
+			const placeholders = batch.map(() => "?").join(",");
+			const aliasRows = await c.env.DB.prepare(
+				`SELECT model_id, alias, is_primary, alias_only FROM model_aliases WHERE model_id IN (${placeholders}) ORDER BY model_id, is_primary DESC, alias`,
+			)
+				.bind(...batch)
+				.all<{ model_id: string; alias: string; is_primary: number; alias_only: number }>();
 
-		for (const row of aliasRows.results ?? []) {
-			if (!modelAliases[row.model_id]) {
-				modelAliases[row.model_id] = { aliases: [], alias_only: false };
-			}
-			modelAliases[row.model_id].aliases.push({
-				alias: row.alias,
-				is_primary: row.is_primary === 1,
-			});
-			if (row.alias_only === 1) {
-				modelAliases[row.model_id].alias_only = true;
+			for (const row of aliasRows.results ?? []) {
+				if (!modelAliases[row.model_id]) {
+					modelAliases[row.model_id] = { aliases: [], alias_only: false };
+				}
+				modelAliases[row.model_id].aliases.push({
+					alias: row.alias,
+					is_primary: row.is_primary === 1,
+				});
+				if (row.alias_only === 1) {
+					modelAliases[row.model_id].alias_only = true;
+				}
 			}
 		}
 	}
