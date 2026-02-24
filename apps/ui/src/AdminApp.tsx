@@ -145,6 +145,15 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const loadSettings = useCallback(async () => {
 		const settings = await apiFetch<Settings>("/api/settings");
 		setData((prev) => ({ ...prev, settings }));
+		setSettingsForm({
+			log_retention_days: String(settings.log_retention_days ?? 30),
+			session_ttl_hours: String(settings.session_ttl_hours ?? 12),
+			admin_password: "",
+			site_mode: settings.site_mode ?? "personal",
+			registration_mode: settings.registration_mode ?? "open",
+			checkin_reward: String(settings.checkin_reward ?? 0.5),
+			require_invite_code: settings.require_invite_code ? "true" : "false",
+		});
 		if (settings.require_invite_code) {
 			const result = await apiFetch<{ codes: InviteCode[] }>("/api/invite-codes");
 			setInviteCodes(result.codes);
@@ -201,18 +210,6 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		return () => window.removeEventListener("popstate", handlePopState);
 	}, []);
 
-	useEffect(() => {
-		if (!data.settings) return;
-		setSettingsForm({
-			log_retention_days: String(data.settings.log_retention_days ?? 30),
-			session_ttl_hours: String(data.settings.session_ttl_hours ?? 12),
-			admin_password: "",
-			site_mode: data.settings.site_mode ?? "personal",
-			registration_mode: data.settings.registration_mode ?? "open",
-			checkin_reward: String(data.settings.checkin_reward ?? 0.5),
-			require_invite_code: data.settings.require_invite_code ? "true" : "false",
-		});
-	}, [data.settings]);
 
 	const handleLogout = useCallback(async () => {
 		await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => null);
