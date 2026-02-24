@@ -86,6 +86,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		const params = new URLSearchParams(window.location.search);
 		const bindOk = params.get("linuxdo_bindok");
 		const bindError = params.get("linuxdo_binderror");
+		const rechargeOk = params.get("recharge");
 		if (bindOk) {
 			history.replaceState(null, "", "/user");
 			setNotice("Linux DO 账号绑定成功");
@@ -101,6 +102,10 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 				invalid_bind_cookie: "绑定失败：绑定状态无效",
 			};
 			setNotice(errorMessages[bindError] ?? `绑定失败：${bindError}`);
+		} else if (rechargeOk === "ok") {
+			history.replaceState(null, "", "/user");
+			setNotice("充值成功，余额已更新");
+			onUserRefresh();
 		}
 	}, [onUserRefresh]);
 

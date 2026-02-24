@@ -138,6 +138,11 @@ export type Settings = {
 	registration_mode: RegistrationMode;
 	checkin_reward: number;
 	require_invite_code: boolean;
+	ldc_payment_enabled: boolean;
+	ldc_epay_pid: string;
+	ldc_epay_key: string;
+	ldc_epay_gateway: string;
+	ldc_exchange_rate: number;
 };
 
 export type ModelChannel = {
@@ -203,6 +208,11 @@ export type SettingsForm = {
 	registration_mode: RegistrationMode;
 	checkin_reward: string;
 	require_invite_code: string;
+	ldc_payment_enabled: string;
+	ldc_epay_pid: string;
+	ldc_epay_key: string;
+	ldc_epay_gateway: string;
+	ldc_exchange_rate: string;
 };
 
 // User types
@@ -246,6 +256,8 @@ export type UserDashboardData = {
 	contributions: ContributionEntry[];
 	checked_in_today: boolean;
 	checkin_reward: number;
+	ldc_payment_enabled: boolean;
+	ldc_exchange_rate: number;
 };
 
 export type UserTabId =
@@ -277,5 +289,14 @@ export type InviteCode = {
 	used_count: number;
 	status: string;
 	created_by: string | null;
+	created_at: string;
+};
+
+export type RechargeOrder = {
+	id: string;
+	out_trade_no: string;
+	ldc_amount: number;
+	balance_amount: number;
+	status: string;
 	created_at: string;
 };

@@ -223,6 +223,118 @@ export const SettingsView = ({
 			</div>
 			</>
 			)}
+			{settingsForm.site_mode !== "personal" && (
+			<>
+			<div class="lg:col-span-2 border-t border-stone-100 pt-4 mt-1">
+				<h4 class="mb-3 text-sm font-semibold text-stone-700">LDC 支付设置</h4>
+				<label class="flex items-center gap-2 text-sm text-stone-700">
+					<input
+						type="checkbox"
+						class="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+						checked={settingsForm.ldc_payment_enabled === "true"}
+						onChange={(event) => {
+							const target = event.currentTarget as HTMLInputElement | null;
+							onFormChange({
+								ldc_payment_enabled: target?.checked ? "true" : "false",
+							});
+						}}
+					/>
+					启用 LDC 支付充值
+				</label>
+			</div>
+			{settingsForm.ldc_payment_enabled === "true" && (
+			<>
+			<div>
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="ldc-epay-pid"
+				>
+					商户 PID
+				</label>
+				<input
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="ldc-epay-pid"
+					name="ldc_epay_pid"
+					type="text"
+					value={settingsForm.ldc_epay_pid}
+					onInput={(event) => {
+						const target = event.currentTarget as HTMLInputElement | null;
+						onFormChange({
+							ldc_epay_pid: target?.value ?? "",
+						});
+					}}
+				/>
+			</div>
+			<div>
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="ldc-epay-key"
+				>
+					商户密钥
+				</label>
+				<input
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="ldc-epay-key"
+					name="ldc_epay_key"
+					type="password"
+					value={settingsForm.ldc_epay_key}
+					onInput={(event) => {
+						const target = event.currentTarget as HTMLInputElement | null;
+						onFormChange({
+							ldc_epay_key: target?.value ?? "",
+						});
+					}}
+				/>
+			</div>
+			<div>
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="ldc-epay-gateway"
+				>
+					支付网关
+				</label>
+				<input
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="ldc-epay-gateway"
+					name="ldc_epay_gateway"
+					type="text"
+					placeholder="https://credit.linux.do/epay"
+					value={settingsForm.ldc_epay_gateway}
+					onInput={(event) => {
+						const target = event.currentTarget as HTMLInputElement | null;
+						onFormChange({
+							ldc_epay_gateway: target?.value ?? "",
+						});
+					}}
+				/>
+			</div>
+			<div>
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="ldc-exchange-rate"
+				>
+					汇率 (1 LDC = ? 余额)
+				</label>
+				<input
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="ldc-exchange-rate"
+					name="ldc_exchange_rate"
+					type="number"
+					min="0.001"
+					step="0.01"
+					value={settingsForm.ldc_exchange_rate}
+					onInput={(event) => {
+						const target = event.currentTarget as HTMLInputElement | null;
+						onFormChange({
+							ldc_exchange_rate: target?.value ?? "",
+						});
+					}}
+				/>
+			</div>
+			</>
+			)}
+			</>
+			)}
 			<div class="flex items-end lg:col-span-2">
 				<button
 					class="h-11 rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"

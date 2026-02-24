@@ -56,4 +56,9 @@ export const initialSettingsForm: SettingsForm = {
 	registration_mode: "open",
 	checkin_reward: "0.5",
 	require_invite_code: "false",
+	ldc_payment_enabled: "false",
+	ldc_epay_pid: "",
+	ldc_epay_key: "",
+	ldc_epay_gateway: "https://credit.linux.do/epay",
+	ldc_exchange_rate: "0.1",
 };

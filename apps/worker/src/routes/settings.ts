@@ -2,6 +2,11 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import {
 	getCheckinReward,
+	getLdcEpayGateway,
+	getLdcEpayKey,
+	getLdcEpayPid,
+	getLdcExchangeRate,
+	getLdcPaymentEnabled,
 	getRegistrationMode,
 	getRequireInviteCode,
 	getRetentionDays,
@@ -10,6 +15,11 @@ import {
 	isAdminPasswordSet,
 	setAdminPasswordHash,
 	setCheckinReward,
+	setLdcEpayGateway,
+	setLdcEpayKey,
+	setLdcEpayPid,
+	setLdcExchangeRate,
+	setLdcPaymentEnabled,
 	setRegistrationMode,
 	setRequireInviteCode,
 	setRetentionDays,
@@ -34,6 +44,11 @@ settings.get("/", async (c) => {
 	const registrationMode = await getRegistrationMode(c.env.DB);
 	const checkinReward = await getCheckinReward(c.env.DB);
 	const requireInviteCode = await getRequireInviteCode(c.env.DB);
+	const ldcPaymentEnabled = await getLdcPaymentEnabled(c.env.DB);
+	const ldcEpayPid = await getLdcEpayPid(c.env.DB);
+	const ldcEpayKey = await getLdcEpayKey(c.env.DB);
+	const ldcEpayGateway = await getLdcEpayGateway(c.env.DB);
+	const ldcExchangeRate = await getLdcExchangeRate(c.env.DB);
 	return c.json({
 		log_retention_days: retention,
 		session_ttl_hours: sessionTtlHours,
@@ -42,6 +57,11 @@ settings.get("/", async (c) => {
 		registration_mode: registrationMode,
 		checkin_reward: checkinReward,
 		require_invite_code: requireInviteCode,
+		ldc_payment_enabled: ldcPaymentEnabled,
+		ldc_epay_pid: ldcEpayPid,
+		ldc_epay_key: ldcEpayKey,
+		ldc_epay_gateway: ldcEpayGateway,
+		ldc_exchange_rate: ldcExchangeRate,
 	});
 });
 
@@ -135,6 +155,41 @@ settings.put("/", async (c) => {
 	if (body.require_invite_code !== undefined) {
 		const value = body.require_invite_code === true || body.require_invite_code === "true";
 		await setRequireInviteCode(c.env.DB, value);
+		touched = true;
+	}
+
+	if (body.ldc_payment_enabled !== undefined) {
+		const value = body.ldc_payment_enabled === true || body.ldc_payment_enabled === "true";
+		await setLdcPaymentEnabled(c.env.DB, value);
+		touched = true;
+	}
+
+	if (body.ldc_epay_pid !== undefined) {
+		await setLdcEpayPid(c.env.DB, String(body.ldc_epay_pid));
+		touched = true;
+	}
+
+	if (body.ldc_epay_key !== undefined) {
+		await setLdcEpayKey(c.env.DB, String(body.ldc_epay_key));
+		touched = true;
+	}
+
+	if (body.ldc_epay_gateway !== undefined) {
+		await setLdcEpayGateway(c.env.DB, String(body.ldc_epay_gateway));
+		touched = true;
+	}
+
+	if (body.ldc_exchange_rate !== undefined) {
+		const rate = Number(body.ldc_exchange_rate);
+		if (Number.isNaN(rate) || rate <= 0) {
+			return jsonError(
+				c,
+				400,
+				"invalid_ldc_exchange_rate",
+				"invalid_ldc_exchange_rate",
+			);
+		}
+		await setLdcExchangeRate(c.env.DB, rate);
 		touched = true;
 	}
 

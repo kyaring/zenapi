@@ -5,7 +5,7 @@ import { userAuth } from "../middleware/userAuth";
 import { extractModelPricings, extractModelIds, extractSharedModelPricings } from "../services/channel-models";
 import { listActiveChannels } from "../services/channel-repo";
 import { loadAllChannelAliasesGrouped } from "../services/model-aliases";
-import { getCheckinReward, getSiteMode } from "../services/settings";
+import { getCheckinReward, getLdcExchangeRate, getLdcPaymentEnabled, getSiteMode } from "../services/settings";
 import { generateToken, sha256Hex } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
@@ -279,6 +279,8 @@ userApi.get("/dashboard", async (c) => {
 
 	const siteMode = await getSiteMode(c.env.DB);
 	const checkinReward = await getCheckinReward(c.env.DB);
+	const ldcPaymentEnabled = await getLdcPaymentEnabled(c.env.DB);
+	const ldcExchangeRate = await getLdcExchangeRate(c.env.DB);
 	const todayStr = new Date().toISOString().slice(0, 10);
 	const checkinRow = await c.env.DB.prepare(
 		"SELECT id FROM user_checkins WHERE user_id = ? AND checkin_date = ?",
@@ -367,6 +369,8 @@ userApi.get("/dashboard", async (c) => {
 		contributions,
 		checked_in_today: checkedInToday,
 		checkin_reward: checkinReward,
+		ldc_payment_enabled: ldcPaymentEnabled,
+		ldc_exchange_rate: ldcExchangeRate,
 	});
 });
 

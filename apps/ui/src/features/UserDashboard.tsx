@@ -129,6 +129,9 @@ export const UserDashboard = ({ data, user, token, updateToken, linuxdoEnabled, 
 	const [profileNotice, setProfileNotice] = useState("");
 	const [checkinLoading, setCheckinLoading] = useState(false);
 	const [checkinNotice, setCheckinNotice] = useState("");
+	const [rechargeAmount, setRechargeAmount] = useState("");
+	const [rechargeLoading, setRechargeLoading] = useState(false);
+	const [rechargeNotice, setRechargeNotice] = useState("");
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
@@ -166,6 +169,29 @@ export const UserDashboard = ({ data, user, token, updateToken, linuxdoEnabled, 
 			setProfileNotice((error as Error).message);
 		}
 	}, [apiFetch, tipUrl, onUserRefresh]);
+
+	const handleRecharge = useCallback(async () => {
+		const amount = Number(rechargeAmount);
+		if (!amount || amount <= 0) {
+			setRechargeNotice("请输入有效的充值金额");
+			return;
+		}
+		setRechargeLoading(true);
+		setRechargeNotice("");
+		try {
+			const result = await apiFetch<{ order_id: string; redirect_url: string }>("/api/u/recharge/create", {
+				method: "POST",
+				body: JSON.stringify({ ldc_amount: amount }),
+			});
+			if (result.redirect_url) {
+				window.location.href = result.redirect_url;
+			}
+		} catch (error) {
+			setRechargeNotice((error as Error).message);
+		} finally {
+			setRechargeLoading(false);
+		}
+	}, [apiFetch, rechargeAmount]);
 
 	if (!data) {
 		return (
@@ -213,6 +239,52 @@ export const UserDashboard = ({ data, user, token, updateToken, linuxdoEnabled, 
 					</div>
 				)}
 			</div>
+
+			{/* Recharge card */}
+			{data.ldc_payment_enabled && (
+			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+				<h3 class="font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
+					LDC 充值
+				</h3>
+				<p class="mb-3 text-xs text-stone-500">
+					1 LDC = ${data.ldc_exchange_rate} 余额
+				</p>
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+					<div class="flex-1">
+						<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
+							LDC 积分数量
+						</label>
+						<input
+							class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+							type="number"
+							min="1"
+							step="1"
+							placeholder="输入 LDC 积分数量"
+							value={rechargeAmount}
+							onInput={(e) => setRechargeAmount((e.currentTarget as HTMLInputElement)?.value ?? "")}
+						/>
+					</div>
+					<button
+						type="button"
+						disabled={rechargeLoading || !rechargeAmount}
+						class="h-[42px] rounded-lg bg-stone-900 px-5 text-sm font-semibold text-white transition-all duration-200 ease-in-out hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+						onClick={handleRecharge}
+					>
+						{rechargeLoading ? "处理中..." : "充值"}
+					</button>
+				</div>
+				{rechargeAmount && Number(rechargeAmount) > 0 && (
+					<p class="mt-2 text-sm text-stone-600">
+						支付 {rechargeAmount} LDC 积分 → 获得 ${(Number(rechargeAmount) * data.ldc_exchange_rate).toFixed(2)} 余额
+					</p>
+				)}
+				{rechargeNotice && (
+					<div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+						{rechargeNotice}
+					</div>
+				)}
+			</div>
+			)}
 
 			{/* Stats cards */}
 			<div class="grid grid-cols-2 gap-4 lg:grid-cols-4">

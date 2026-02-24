@@ -221,3 +221,76 @@ export async function setRequireInviteCode(
 ): Promise<void> {
 	await upsertSetting(db, REQUIRE_INVITE_CODE_KEY, required ? "true" : "false");
 }
+
+// LDC Payment settings
+const LDC_PAYMENT_ENABLED_KEY = "ldc_payment_enabled";
+const LDC_EPAY_PID_KEY = "ldc_epay_pid";
+const LDC_EPAY_KEY_KEY = "ldc_epay_key";
+const LDC_EPAY_GATEWAY_KEY = "ldc_epay_gateway";
+const LDC_EXCHANGE_RATE_KEY = "ldc_exchange_rate";
+const DEFAULT_LDC_EPAY_GATEWAY = "https://credit.linux.do/epay";
+const DEFAULT_LDC_EXCHANGE_RATE = 0.1;
+
+export async function getLdcPaymentEnabled(db: D1Database): Promise<boolean> {
+	const value = await readSetting(db, LDC_PAYMENT_ENABLED_KEY);
+	return value === "true";
+}
+
+export async function setLdcPaymentEnabled(
+	db: D1Database,
+	enabled: boolean,
+): Promise<void> {
+	await upsertSetting(db, LDC_PAYMENT_ENABLED_KEY, enabled ? "true" : "false");
+}
+
+export async function getLdcEpayPid(db: D1Database): Promise<string> {
+	const value = await readSetting(db, LDC_EPAY_PID_KEY);
+	return value ?? "";
+}
+
+export async function setLdcEpayPid(
+	db: D1Database,
+	pid: string,
+): Promise<void> {
+	await upsertSetting(db, LDC_EPAY_PID_KEY, pid);
+}
+
+export async function getLdcEpayKey(db: D1Database): Promise<string> {
+	const value = await readSetting(db, LDC_EPAY_KEY_KEY);
+	return value ?? "";
+}
+
+export async function setLdcEpayKey(
+	db: D1Database,
+	key: string,
+): Promise<void> {
+	await upsertSetting(db, LDC_EPAY_KEY_KEY, key);
+}
+
+export async function getLdcEpayGateway(db: D1Database): Promise<string> {
+	const value = await readSetting(db, LDC_EPAY_GATEWAY_KEY);
+	return value || DEFAULT_LDC_EPAY_GATEWAY;
+}
+
+export async function setLdcEpayGateway(
+	db: D1Database,
+	gateway: string,
+): Promise<void> {
+	await upsertSetting(db, LDC_EPAY_GATEWAY_KEY, gateway);
+}
+
+export async function getLdcExchangeRate(db: D1Database): Promise<number> {
+	const value = await readSetting(db, LDC_EXCHANGE_RATE_KEY);
+	if (!value) return DEFAULT_LDC_EXCHANGE_RATE;
+	const parsed = Number(value);
+	if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+	return DEFAULT_LDC_EXCHANGE_RATE;
+}
+
+export async function setLdcExchangeRate(
+	db: D1Database,
+	rate: number,
+): Promise<void> {
+	const value = Math.max(0.001, rate).toString();
+	await upsertSetting(db, LDC_EXCHANGE_RATE_KEY, value);
+}
