@@ -586,9 +586,9 @@ proxy.all("/*", tokenAuth, async (c) => {
 				if (feeEnabled) {
 					const now = new Date().toISOString();
 					await c.env.DB.prepare(
-						"UPDATE users SET balance = balance + ?, updated_at = ? WHERE id = ?",
+						"UPDATE users SET balance = balance + ?, withdrawable_balance = withdrawable_balance + ?, updated_at = ? WHERE id = ?",
 					)
-						.bind(cost, now, channelForUsage.contributed_by)
+						.bind(cost, cost, now, channelForUsage.contributed_by)
 						.run();
 				}
 			}

@@ -18,6 +18,7 @@ import newapiUserRoutes from "./routes/newapiUsers";
 import proxyRoutes from "./routes/proxy";
 import publicRoutes from "./routes/public";
 import rechargeRoutes from "./routes/recharge";
+import withdrawalRoutes from "./routes/withdrawal";
 import settingsRoutes from "./routes/settings";
 import tokenRoutes from "./routes/tokens";
 import userApiRoutes from "./routes/user-api";
@@ -146,6 +147,7 @@ app.route("/api/u/auth", userAuthRoutes);
 app.route("/api/u", userApiRoutes);
 app.route("/api/u/channels", userChannelRoutes);
 app.route("/api/recharge", rechargeRoutes);
+app.route("/api/u/withdrawal", withdrawalRoutes);
 
 app.route("/v1", proxyRoutes);
 app.route("/anthropic/v1", anthropicProxyRoutes);

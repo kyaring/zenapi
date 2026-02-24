@@ -106,7 +106,7 @@ userAuthRoutes.post("/register", async (c) => {
 	return c.json({
 		token: rawToken,
 		expires_at: expiresAt,
-		user: { id, email, name, role: "user", balance: defaultBalance, status: "active" },
+		user: { id, email, name, role: "user", balance: defaultBalance, withdrawable_balance: 0, status: "active" },
 	});
 });
 
@@ -532,7 +532,7 @@ userAuthRoutes.get("/linuxdo/callback", async (c) => {
 				.run();
 		}
 
-		user = { id, email, name: finalName, role: "user", balance: defaultBalance, status: "active" };
+		user = { id, email, name: finalName, role: "user", balance: defaultBalance, withdrawable_balance: 0, status: "active" };
 	}
 
 	// Create session

@@ -240,9 +240,58 @@ export const SettingsView = ({
 					启用渠道贡献者收费
 				</label>
 				<p class="mt-1 ml-6 text-xs text-stone-500">
-					开启后，贡献渠道的用户可以为模型设置价格，其他用户调用时产生的费用将进入贡献者余额
+					开启后，贡献渠道的用户可以设置收费，其他用户调用时产生的费用将进入贡献者余额
 				</p>
 			</div>
+			)}
+			{settingsForm.site_mode === "shared" && settingsForm.channel_fee_enabled === "true" && (
+			<>
+			<div class="lg:col-span-2">
+				<label class="flex items-center gap-2 text-sm text-stone-700">
+					<input
+						type="checkbox"
+						class="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+						checked={settingsForm.withdrawal_enabled === "true"}
+						onChange={(event) => {
+							const target = event.currentTarget as HTMLInputElement | null;
+							onFormChange({
+								withdrawal_enabled: target?.checked ? "true" : "false",
+							});
+						}}
+					/>
+					启用余额提现
+				</label>
+				<p class="mt-1 ml-6 text-xs text-stone-500">
+					允许用户将可提现余额（渠道收益和充值所得）兑换为 LDC 积分
+				</p>
+			</div>
+			{settingsForm.withdrawal_enabled === "true" && (
+			<div>
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="withdrawal-fee-rate"
+				>
+					提现手续费率 (%)
+				</label>
+				<input
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="withdrawal-fee-rate"
+					name="withdrawal_fee_rate"
+					type="number"
+					min="0"
+					max="100"
+					step="0.1"
+					value={settingsForm.withdrawal_fee_rate}
+					onInput={(event) => {
+						const target = event.currentTarget as HTMLInputElement | null;
+						onFormChange({
+							withdrawal_fee_rate: target?.value ?? "",
+						});
+					}}
+				/>
+			</div>
+			)}
+			</>
 			)}
 			{settingsForm.site_mode !== "personal" && (
 			<>

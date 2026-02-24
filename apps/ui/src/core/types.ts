@@ -140,6 +140,8 @@ export type Settings = {
 	checkin_reward: number;
 	require_invite_code: boolean;
 	channel_fee_enabled: boolean;
+	withdrawal_enabled: boolean;
+	withdrawal_fee_rate: number;
 	ldc_payment_enabled: boolean;
 	ldc_epay_pid: string;
 	ldc_epay_key: string;
@@ -211,6 +213,8 @@ export type SettingsForm = {
 	checkin_reward: string;
 	require_invite_code: string;
 	channel_fee_enabled: string;
+	withdrawal_enabled: string;
+	withdrawal_fee_rate: string;
 	ldc_payment_enabled: string;
 	ldc_epay_pid: string;
 	ldc_epay_key: string;
@@ -252,6 +256,7 @@ export type ContributionEntry = {
 
 export type UserDashboardData = {
 	balance: number;
+	withdrawable_balance: number;
 	total_requests: number;
 	total_tokens: number;
 	total_cost: number;
@@ -261,6 +266,8 @@ export type UserDashboardData = {
 	checkin_reward: number;
 	ldc_payment_enabled: boolean;
 	ldc_exchange_rate: number;
+	withdrawal_enabled: boolean;
+	withdrawal_fee_rate: number;
 };
 
 export type UserTabId =

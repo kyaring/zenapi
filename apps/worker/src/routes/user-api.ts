@@ -5,7 +5,7 @@ import { userAuth } from "../middleware/userAuth";
 import { extractModelPricings, extractModelIds, extractSharedModelPricings } from "../services/channel-models";
 import { listActiveChannels } from "../services/channel-repo";
 import { loadAllChannelAliasesGrouped } from "../services/model-aliases";
-import { getCheckinReward, getLdcExchangeRate, getLdcPaymentEnabled, getSiteMode } from "../services/settings";
+import { getCheckinReward, getLdcExchangeRate, getLdcPaymentEnabled, getSiteMode, getWithdrawalEnabled, getWithdrawalFeeRate } from "../services/settings";
 import { generateToken, sha256Hex } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
@@ -281,6 +281,8 @@ userApi.get("/dashboard", async (c) => {
 	const checkinReward = await getCheckinReward(c.env.DB);
 	const ldcPaymentEnabled = await getLdcPaymentEnabled(c.env.DB);
 	const ldcExchangeRate = await getLdcExchangeRate(c.env.DB);
+	const withdrawalEnabled = await getWithdrawalEnabled(c.env.DB);
+	const withdrawalFeeRate = await getWithdrawalFeeRate(c.env.DB);
 	const todayStr = new Date().toISOString().slice(0, 10);
 	const checkinRow = await c.env.DB.prepare(
 		"SELECT id FROM user_checkins WHERE user_id = ? AND checkin_date = ?",
@@ -362,6 +364,7 @@ userApi.get("/dashboard", async (c) => {
 
 	return c.json({
 		balance: user.balance,
+		withdrawable_balance: user.withdrawable_balance,
 		total_requests: summary?.total_requests ?? 0,
 		total_tokens: summary?.total_tokens ?? 0,
 		total_cost: summary?.total_cost ?? 0,
@@ -371,6 +374,8 @@ userApi.get("/dashboard", async (c) => {
 		checkin_reward: checkinReward,
 		ldc_payment_enabled: ldcPaymentEnabled,
 		ldc_exchange_rate: ldcExchangeRate,
+		withdrawal_enabled: withdrawalEnabled,
+		withdrawal_fee_rate: withdrawalFeeRate,
 	});
 });
 

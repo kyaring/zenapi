@@ -315,3 +315,47 @@ export async function setChannelFeeEnabled(
 ): Promise<void> {
 	await upsertSetting(db, CHANNEL_FEE_ENABLED_KEY, enabled ? "true" : "false");
 }
+
+// Withdrawal settings
+const WITHDRAWAL_ENABLED_KEY = "withdrawal_enabled";
+const WITHDRAWAL_FEE_RATE_KEY = "withdrawal_fee_rate";
+
+/**
+ * Returns whether balance withdrawal is enabled.
+ */
+export async function getWithdrawalEnabled(db: D1Database): Promise<boolean> {
+	const value = await readSetting(db, WITHDRAWAL_ENABLED_KEY);
+	return value === "true";
+}
+
+/**
+ * Updates the withdrawal enabled setting.
+ */
+export async function setWithdrawalEnabled(
+	db: D1Database,
+	enabled: boolean,
+): Promise<void> {
+	await upsertSetting(db, WITHDRAWAL_ENABLED_KEY, enabled ? "true" : "false");
+}
+
+/**
+ * Returns the withdrawal fee rate percentage (0-100).
+ */
+export async function getWithdrawalFeeRate(db: D1Database): Promise<number> {
+	const value = await readSetting(db, WITHDRAWAL_FEE_RATE_KEY);
+	if (!value) return 0;
+	const parsed = Number(value);
+	if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 100) return parsed;
+	return 0;
+}
+
+/**
+ * Updates the withdrawal fee rate setting.
+ */
+export async function setWithdrawalFeeRate(
+	db: D1Database,
+	rate: number,
+): Promise<void> {
+	const value = Math.max(0, Math.min(100, rate)).toString();
+	await upsertSetting(db, WITHDRAWAL_FEE_RATE_KEY, value);
+}

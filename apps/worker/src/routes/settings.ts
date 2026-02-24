@@ -3,6 +3,8 @@ import type { AppEnv } from "../env";
 import {
 	getCheckinReward,
 	getChannelFeeEnabled,
+	getWithdrawalEnabled,
+	getWithdrawalFeeRate,
 	getLdcEpayGateway,
 	getLdcEpayKey,
 	getLdcEpayPid,
@@ -17,6 +19,8 @@ import {
 	setAdminPasswordHash,
 	setCheckinReward,
 	setChannelFeeEnabled,
+	setWithdrawalEnabled,
+	setWithdrawalFeeRate,
 	setLdcEpayGateway,
 	setLdcEpayKey,
 	setLdcEpayPid,
@@ -52,6 +56,8 @@ settings.get("/", async (c) => {
 	const ldcEpayGateway = await getLdcEpayGateway(c.env.DB);
 	const ldcExchangeRate = await getLdcExchangeRate(c.env.DB);
 	const channelFeeEnabled = await getChannelFeeEnabled(c.env.DB);
+	const withdrawalEnabled = await getWithdrawalEnabled(c.env.DB);
+	const withdrawalFeeRate = await getWithdrawalFeeRate(c.env.DB);
 	return c.json({
 		log_retention_days: retention,
 		session_ttl_hours: sessionTtlHours,
@@ -66,6 +72,8 @@ settings.get("/", async (c) => {
 		ldc_epay_gateway: ldcEpayGateway,
 		ldc_exchange_rate: ldcExchangeRate,
 		channel_fee_enabled: channelFeeEnabled,
+		withdrawal_enabled: withdrawalEnabled,
+		withdrawal_fee_rate: withdrawalFeeRate,
 	});
 });
 
@@ -200,6 +208,26 @@ settings.put("/", async (c) => {
 	if (body.channel_fee_enabled !== undefined) {
 		const value = body.channel_fee_enabled === true || body.channel_fee_enabled === "true";
 		await setChannelFeeEnabled(c.env.DB, value);
+		touched = true;
+	}
+
+	if (body.withdrawal_enabled !== undefined) {
+		const value = body.withdrawal_enabled === true || body.withdrawal_enabled === "true";
+		await setWithdrawalEnabled(c.env.DB, value);
+		touched = true;
+	}
+
+	if (body.withdrawal_fee_rate !== undefined) {
+		const rate = Number(body.withdrawal_fee_rate);
+		if (Number.isNaN(rate) || rate < 0 || rate > 100) {
+			return jsonError(
+				c,
+				400,
+				"invalid_withdrawal_fee_rate",
+				"invalid_withdrawal_fee_rate",
+			);
+		}
+		await setWithdrawalFeeRate(c.env.DB, rate);
 		touched = true;
 	}
 
