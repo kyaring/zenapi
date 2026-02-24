@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "hono/jsx/dom";
 import { createApiFetch } from "../core/api";
 import type { ChannelApiFormat } from "../core/types";
+import type { ModelAliasConfig, ModelAliasesMap } from "../UserApp";
 
 type ChannelItem = {
 	id: string;
@@ -55,6 +56,7 @@ type UserChannelsViewProps = {
 	token: string;
 	updateToken: (next: string | null) => void;
 	channels: ChannelItem[];
+	modelAliases: ModelAliasesMap;
 	onRefresh: () => Promise<void>;
 };
 
@@ -62,12 +64,17 @@ export const UserChannelsView = ({
 	token,
 	updateToken,
 	channels,
+	modelAliases,
 	onRefresh,
 }: UserChannelsViewProps) => {
 	const [showModal, setShowModal] = useState(false);
 	const [editingChannel, setEditingChannel] = useState<ChannelItem | null>(null);
 	const [notice, setNotice] = useState("");
 	const [form, setForm] = useState<ChannelFormData>({ ...emptyForm });
+	// Per-model alias state: Record<modelId, { aliases, alias_only }>
+	const [aliasState, setAliasState] = useState<Record<string, ModelAliasConfig>>({});
+	// Track which models have their alias editor expanded
+	const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
@@ -77,6 +84,8 @@ export const UserChannelsView = ({
 	const openCreate = useCallback(() => {
 		setEditingChannel(null);
 		setForm({ ...emptyForm });
+		setAliasState({});
+		setExpandedModels(new Set());
 		setShowModal(true);
 		setNotice("");
 	}, []);
@@ -90,14 +99,32 @@ export const UserChannelsView = ({
 			api_format: (ch.api_format ?? "openai") as ChannelApiFormat,
 			models: parseModelsJsonToText(ch.models_json),
 		});
+		// Initialize alias state from modelAliases for this channel's models
+		const models = parseModelsJsonToText(ch.models_json)
+			.split("\n")
+			.map((l) => l.trim())
+			.filter(Boolean);
+		const initial: Record<string, ModelAliasConfig> = {};
+		for (const m of models) {
+			if (modelAliases[m]) {
+				initial[m] = {
+					aliases: modelAliases[m].aliases.map((a) => ({ ...a })),
+					alias_only: modelAliases[m].alias_only,
+				};
+			}
+		}
+		setAliasState(initial);
+		setExpandedModels(new Set());
 		setShowModal(true);
 		setNotice("");
-	}, []);
+	}, [modelAliases]);
 
 	const closeModal = useCallback(() => {
 		setShowModal(false);
 		setEditingChannel(null);
 		setForm({ ...emptyForm });
+		setAliasState({});
+		setExpandedModels(new Set());
 	}, []);
 
 	const handleSubmit = useCallback(
@@ -109,12 +136,22 @@ export const UserChannelsView = ({
 					.map((l) => l.trim())
 					.filter(Boolean)
 					.map((id) => ({ id }));
+				// Build model_aliases payload: only include models that have aliases configured
+				const modelAliasPayload: Record<string, ModelAliasConfig> = {};
+				const modelIds = models.map((m) => m.id);
+				for (const mid of modelIds) {
+					const cfg = aliasState[mid];
+					if (cfg) {
+						modelAliasPayload[mid] = cfg;
+					}
+				}
 				const payload = {
 					name: form.name.trim(),
 					base_url: form.base_url.trim(),
 					api_key: form.api_key.trim(),
 					api_format: form.api_format,
 					models: models.length > 0 ? models : undefined,
+					model_aliases: Object.keys(modelAliasPayload).length > 0 ? modelAliasPayload : undefined,
 				};
 				if (editingChannel) {
 					await apiFetch(`/api/u/channels/${editingChannel.id}`, {
@@ -135,7 +172,7 @@ export const UserChannelsView = ({
 				setNotice((error as Error).message);
 			}
 		},
-		[apiFetch, form, editingChannel, closeModal, onRefresh],
+		[apiFetch, form, aliasState, editingChannel, closeModal, onRefresh],
 	);
 
 	const handleDelete = useCallback(
@@ -153,6 +190,85 @@ export const UserChannelsView = ({
 	);
 
 	const isEditing = Boolean(editingChannel);
+
+	// Parse models from textarea in real-time for the alias editor
+	const parsedModels = useMemo(
+		() =>
+			form.models
+				.split("\n")
+				.map((l) => l.trim())
+				.filter(Boolean),
+		[form.models],
+	);
+
+	const toggleModelExpanded = useCallback((modelId: string) => {
+		setExpandedModels((prev) => {
+			const next = new Set(prev);
+			if (next.has(modelId)) {
+				next.delete(modelId);
+			} else {
+				next.add(modelId);
+			}
+			return next;
+		});
+	}, []);
+
+	const addAlias = useCallback((modelId: string, alias: string) => {
+		const trimmed = alias.trim();
+		if (!trimmed) return;
+		setAliasState((prev) => {
+			const existing = prev[modelId] ?? { aliases: [], alias_only: false };
+			if (existing.aliases.some((a) => a.alias === trimmed)) return prev;
+			return {
+				...prev,
+				[modelId]: {
+					...existing,
+					aliases: [...existing.aliases, { alias: trimmed, is_primary: false }],
+				},
+			};
+		});
+	}, []);
+
+	const removeAlias = useCallback((modelId: string, index: number) => {
+		setAliasState((prev) => {
+			const existing = prev[modelId];
+			if (!existing) return prev;
+			return {
+				...prev,
+				[modelId]: {
+					...existing,
+					aliases: existing.aliases.filter((_, i) => i !== index),
+				},
+			};
+		});
+	}, []);
+
+	const setPrimary = useCallback((modelId: string, index: number) => {
+		setAliasState((prev) => {
+			const existing = prev[modelId];
+			if (!existing) return prev;
+			return {
+				...prev,
+				[modelId]: {
+					...existing,
+					aliases: existing.aliases.map((a, i) => ({
+						...a,
+						is_primary: i === index,
+					})),
+				},
+			};
+		});
+	}, []);
+
+	const toggleAliasOnly = useCallback((modelId: string, checked: boolean) => {
+		setAliasState((prev) => {
+			const existing = prev[modelId] ?? { aliases: [], alias_only: false };
+			return {
+				...prev,
+				[modelId]: { ...existing, alias_only: checked },
+			};
+		});
+	}, []);
 
 	return (
 		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -353,6 +469,109 @@ export const UserChannelsView = ({
 									}
 								/>
 							</div>
+							{/* Per-model alias editor */}
+							{parsedModels.length > 0 && (
+								<div>
+									<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
+										模型别名配置
+									</label>
+									<div class="space-y-1">
+										{parsedModels.map((modelId) => {
+											const config = aliasState[modelId];
+											const aliasCount = config?.aliases?.length ?? 0;
+											const isExpanded = expandedModels.has(modelId);
+											return (
+												<div class="rounded-lg border border-stone-200">
+													<button
+														type="button"
+														class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-stone-50"
+														onClick={() => toggleModelExpanded(modelId)}
+													>
+														<span class="text-xs text-stone-400">{isExpanded ? "▼" : "▶"}</span>
+														<span class="flex-1 truncate font-mono text-xs text-stone-800">{modelId}</span>
+														{aliasCount > 0 && (
+															<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+																{aliasCount} 个别名
+															</span>
+														)}
+													</button>
+													{isExpanded && (
+														<div class="border-t border-stone-100 px-3 py-2.5">
+															{/* Existing aliases */}
+															{config?.aliases && config.aliases.length > 0 && (
+																<div class="mb-2 space-y-1.5">
+																	{config.aliases.map((alias, index) => (
+																		<div class="flex items-center gap-2 rounded border border-stone-100 bg-stone-50 px-2 py-1.5">
+																			<label class="flex cursor-pointer items-center gap-1 text-xs text-stone-500">
+																				<input
+																					type="radio"
+																					name={`primary-${modelId}`}
+																					checked={alias.is_primary}
+																					onChange={() => setPrimary(modelId, index)}
+																					class="accent-amber-500"
+																				/>
+																				主名
+																			</label>
+																			<span class="flex-1 break-all font-mono text-xs text-stone-700">{alias.alias}</span>
+																			<button
+																				type="button"
+																				class="rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600"
+																				onClick={() => removeAlias(modelId, index)}
+																			>
+																				删除
+																			</button>
+																		</div>
+																	))}
+																</div>
+															)}
+															{/* Add new alias */}
+															<div class="flex gap-1.5">
+																<input
+																	type="text"
+																	class="flex-1 rounded border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-200"
+																	placeholder="输入别名..."
+																	onKeyDown={(e) => {
+																		if (e.key === "Enter") {
+																			e.preventDefault();
+																			const input = e.currentTarget as HTMLInputElement;
+																			addAlias(modelId, input.value);
+																			input.value = "";
+																		}
+																	}}
+																/>
+																<button
+																	type="button"
+																	class="rounded border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
+																	onClick={(e) => {
+																		const input = (e.currentTarget as HTMLElement).previousElementSibling as HTMLInputElement;
+																		addAlias(modelId, input.value);
+																		input.value = "";
+																	}}
+																>
+																	添加
+																</button>
+															</div>
+															{/* Alias-only checkbox */}
+															{(config?.aliases?.length ?? 0) > 0 && (
+																<label class="mt-2 flex cursor-pointer items-center gap-2 rounded border border-stone-100 bg-stone-50 px-2 py-1.5">
+																	<input
+																		type="checkbox"
+																		checked={config?.alias_only ?? false}
+																		onChange={(e) => toggleAliasOnly(modelId, (e.currentTarget as HTMLInputElement).checked)}
+																		class="accent-amber-500"
+																	/>
+																	<span class="text-xs text-stone-700">仅限别名</span>
+																	<span class="text-xs text-stone-400">— 隐藏原始模型名</span>
+																</label>
+															)}
+														</div>
+													)}
+												</div>
+											);
+										})}
+									</div>
+								</div>
+							)}
 							<div class="flex justify-end gap-3">
 								<button
 									type="button"
