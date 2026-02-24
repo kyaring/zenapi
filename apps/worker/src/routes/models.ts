@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { extractModelPricings, modelsToJson } from "../services/channel-models";
 import { listActiveChannels } from "../services/channel-repo";
-import { listAllAliases } from "../services/model-aliases";
+import { listAllAliases, loadAllChannelAliasMap, loadChannelAliasOnlyMap, loadChannelPrimaryNameMap } from "../services/model-aliases";
 import { jsonError } from "../utils/http";
 
 const models = new Hono<AppEnv>();
@@ -38,6 +38,7 @@ models.get("/", async (c) => {
 
 	// Build model -> channels map with pricing
 	const modelMap = new Map<string, ChannelInfo[]>();
+	const modelChannelIds = new Map<string, string[]>();
 	for (const channel of channels) {
 		const pricings = extractModelPricings(channel);
 		for (const p of pricings) {
@@ -50,6 +51,10 @@ models.get("/", async (c) => {
 				avg_latency_ms: null,
 			});
 			modelMap.set(p.id, existing);
+
+			const chIds = modelChannelIds.get(p.id) ?? [];
+			chIds.push(channel.id);
+			modelChannelIds.set(p.id, chIds);
 		}
 	}
 
@@ -134,10 +139,14 @@ models.get("/", async (c) => {
 		channelLatencyMap.set(`${row.model}:${row.channel_id}`, row.avg_latency_ms);
 	}
 
-	// Load aliases for display_name
+	// Load aliases for display_name (global + per-channel)
 	const aliasMap = await listAllAliases(c.env.DB);
+	const channelPrimaryNames = await loadChannelPrimaryNameMap(c.env.DB);
+	const channelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
+	const channelAliasMap = await loadAllChannelAliasMap(c.env.DB);
 
 	// Build result
+	const modelIdSet = new Set(modelMap.keys());
 	const results: ModelResult[] = [];
 	for (const [modelId, channelInfos] of modelMap) {
 		const usage = usageMap.get(modelId);
@@ -151,9 +160,23 @@ models.get("/", async (c) => {
 		}));
 
 		const aliases = aliasMap.get(modelId) ?? [];
+		const globalAliasOnly = aliases.length > 0 && aliases[0].alias_only;
+
+		// Check per-channel alias_only: hide if ALL providing channels have alias_only
+		const providers = modelChannelIds.get(modelId) ?? [];
+		let perChannelAllAliasOnly = false;
+		if (!globalAliasOnly && providers.length > 0) {
+			perChannelAllAliasOnly = providers.every((chId) => {
+				const aoModels = channelAliasOnlyMap.get(chId);
+				return aoModels?.has(modelId) ?? false;
+			});
+		}
+
+		const aliasOnly = globalAliasOnly || perChannelAllAliasOnly;
+
+		// display_name: global primary > per-channel primary > model_id
 		const primary = aliases.find((a) => a.is_primary);
-		const displayName = primary ? primary.alias : modelId;
-		const aliasOnly = aliases.length > 0 && aliases[0].alias_only;
+		const displayName = primary ? primary.alias : (channelPrimaryNames.get(modelId) ?? modelId);
 
 		results.push({
 			id: modelId,
@@ -169,6 +192,37 @@ models.get("/", async (c) => {
 				: null,
 			daily: dailyMap.get(modelId) ?? [],
 		});
+	}
+
+	// Add per-channel alias entries that aren't already listed
+	const listedIds = new Set(results.map((r) => r.id));
+	for (const [alias, targetModelId] of channelAliasMap) {
+		if (modelIdSet.has(targetModelId) && !listedIds.has(alias)) {
+			const targetUsage = usageMap.get(targetModelId);
+			const targetChannels = modelMap.get(targetModelId) ?? [];
+			const enrichedChannels = targetChannels.map((ch) => ({
+				...ch,
+				avg_latency_ms:
+					channelLatencyMap.get(`${targetModelId}:${ch.id}`) != null
+						? Math.round(channelLatencyMap.get(`${targetModelId}:${ch.id}`)!)
+						: null,
+			}));
+			results.push({
+				id: alias,
+				display_name: alias,
+				aliases: [],
+				alias_only: false,
+				channels: enrichedChannels,
+				total_requests: targetUsage?.total_requests ?? 0,
+				total_tokens: targetUsage?.total_tokens ?? 0,
+				total_cost: targetUsage?.total_cost ?? 0,
+				avg_latency_ms: targetUsage?.avg_latency_ms
+					? Math.round(targetUsage.avg_latency_ms)
+					: null,
+				daily: dailyMap.get(targetModelId) ?? [],
+			});
+			listedIds.add(alias);
+		}
 	}
 
 	return c.json({ models: results });
