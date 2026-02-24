@@ -6,6 +6,7 @@ import {
 	getDefaultBalance,
 	getWithdrawalEnabled,
 	getWithdrawalFeeRate,
+	getWithdrawalMode,
 	getLdcEpayGateway,
 	getLdcEpayKey,
 	getLdcEpayPid,
@@ -23,6 +24,7 @@ import {
 	setDefaultBalance,
 	setWithdrawalEnabled,
 	setWithdrawalFeeRate,
+	setWithdrawalMode,
 	setLdcEpayGateway,
 	setLdcEpayKey,
 	setLdcEpayPid,
@@ -35,6 +37,7 @@ import {
 	setSiteMode,
 	type RegistrationMode,
 	type SiteMode,
+	type WithdrawalMode,
 } from "../services/settings";
 import { sha256Hex } from "../utils/crypto";
 import { jsonError } from "../utils/http";
@@ -61,6 +64,7 @@ settings.get("/", async (c) => {
 	const defaultBalance = await getDefaultBalance(c.env.DB);
 	const withdrawalEnabled = await getWithdrawalEnabled(c.env.DB);
 	const withdrawalFeeRate = await getWithdrawalFeeRate(c.env.DB);
+	const withdrawalMode = await getWithdrawalMode(c.env.DB);
 	return c.json({
 		log_retention_days: retention,
 		session_ttl_hours: sessionTtlHours,
@@ -78,6 +82,7 @@ settings.get("/", async (c) => {
 		default_balance: defaultBalance,
 		withdrawal_enabled: withdrawalEnabled,
 		withdrawal_fee_rate: withdrawalFeeRate,
+		withdrawal_mode: withdrawalMode,
 	});
 });
 
@@ -246,6 +251,20 @@ settings.put("/", async (c) => {
 			);
 		}
 		await setWithdrawalFeeRate(c.env.DB, rate);
+		touched = true;
+	}
+
+	if (body.withdrawal_mode !== undefined) {
+		const validModes: WithdrawalMode[] = ["lenient", "strict"];
+		if (!validModes.includes(body.withdrawal_mode)) {
+			return jsonError(
+				c,
+				400,
+				"invalid_withdrawal_mode",
+				"invalid_withdrawal_mode",
+			);
+		}
+		await setWithdrawalMode(c.env.DB, body.withdrawal_mode);
 		touched = true;
 	}
 

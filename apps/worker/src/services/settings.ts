@@ -384,3 +384,26 @@ export async function setDefaultBalance(
 	const value = Math.max(0, amount).toString();
 	await upsertSetting(db, DEFAULT_BALANCE_KEY, value);
 }
+
+// Withdrawal mode: "lenient" = consumption deducts welfare first; "strict" = consumption always reduces withdrawable
+const WITHDRAWAL_MODE_KEY = "withdrawal_mode";
+export type WithdrawalMode = "lenient" | "strict";
+
+/**
+ * Returns the withdrawal mode.
+ */
+export async function getWithdrawalMode(db: D1Database): Promise<WithdrawalMode> {
+	const value = await readSetting(db, WITHDRAWAL_MODE_KEY);
+	if (value === "strict") return "strict";
+	return "lenient";
+}
+
+/**
+ * Updates the withdrawal mode.
+ */
+export async function setWithdrawalMode(
+	db: D1Database,
+	mode: WithdrawalMode,
+): Promise<void> {
+	await upsertSetting(db, WITHDRAWAL_MODE_KEY, mode);
+}

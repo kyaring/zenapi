@@ -18,7 +18,7 @@ import {
 } from "../services/format-converter";
 import { recordUsage } from "../services/usage";
 import { calculateCost, getModelPrice } from "../services/pricing";
-import { getChannelFeeEnabled, getSiteMode } from "../services/settings";
+import { getChannelFeeEnabled, getSiteMode, getWithdrawalMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { extractReasoningEffort } from "../utils/reasoning";
@@ -574,11 +574,20 @@ proxy.all("/*", tokenAuth, async (c) => {
 			// Deduct user balance
 			if (cost > 0 && tokenRecord.user_id) {
 				const now = new Date().toISOString();
-				await c.env.DB.prepare(
-					"UPDATE users SET balance = balance - ?, updated_at = ? WHERE id = ?",
-				)
-					.bind(cost, now, tokenRecord.user_id)
-					.run();
+				const withdrawalMode = await getWithdrawalMode(c.env.DB);
+				if (withdrawalMode === "strict") {
+					await c.env.DB.prepare(
+						"UPDATE users SET balance = balance - ?, withdrawable_balance = MAX(0, withdrawable_balance - ?), updated_at = ? WHERE id = ?",
+					)
+						.bind(cost, cost, now, tokenRecord.user_id)
+						.run();
+				} else {
+					await c.env.DB.prepare(
+						"UPDATE users SET balance = balance - ?, updated_at = ? WHERE id = ?",
+					)
+						.bind(cost, now, tokenRecord.user_id)
+						.run();
+				}
 			}
 			// Credit contributor balance
 			if (cost > 0 && channelForUsage.contributed_by && channelForUsage.charge_enabled === 1) {

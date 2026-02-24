@@ -143,6 +143,7 @@ export type Settings = {
 	default_balance: number;
 	withdrawal_enabled: boolean;
 	withdrawal_fee_rate: number;
+	withdrawal_mode: string;
 	ldc_payment_enabled: boolean;
 	ldc_epay_pid: string;
 	ldc_epay_key: string;
@@ -217,6 +218,7 @@ export type SettingsForm = {
 	default_balance: string;
 	withdrawal_enabled: string;
 	withdrawal_fee_rate: string;
+	withdrawal_mode: string;
 	ldc_payment_enabled: string;
 	ldc_epay_pid: string;
 	ldc_epay_key: string;

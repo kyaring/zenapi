@@ -60,6 +60,7 @@ export const initialSettingsForm: SettingsForm = {
 	default_balance: "0",
 	withdrawal_enabled: "false",
 	withdrawal_fee_rate: "0",
+	withdrawal_mode: "lenient",
 	ldc_payment_enabled: "false",
 	ldc_epay_pid: "",
 	ldc_epay_key: "",

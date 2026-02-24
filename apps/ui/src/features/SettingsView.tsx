@@ -289,6 +289,7 @@ export const SettingsView = ({
 			</div>
 			)}
 			{settingsForm.site_mode !== "personal" && settingsForm.withdrawal_enabled === "true" && (
+			<>
 			<div>
 				<label
 					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
@@ -313,6 +314,30 @@ export const SettingsView = ({
 					}}
 				/>
 			</div>
+			<div>
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="withdrawal-mode"
+				>
+					提现模式
+				</label>
+				<select
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="withdrawal-mode"
+					name="withdrawal_mode"
+					value={settingsForm.withdrawal_mode}
+					onChange={(event) => {
+						const target = event.currentTarget as HTMLSelectElement | null;
+						onFormChange({
+							withdrawal_mode: target?.value ?? "lenient",
+						});
+					}}
+				>
+					<option value="lenient" selected={settingsForm.withdrawal_mode === "lenient"}>宽松 — 消费优先扣除福利额度</option>
+					<option value="strict" selected={settingsForm.withdrawal_mode === "strict"}>严格 — 消费同时扣减可提现额度</option>
+				</select>
+			</div>
+			</>
 			)}
 			{settingsForm.site_mode !== "personal" && (
 			<>
