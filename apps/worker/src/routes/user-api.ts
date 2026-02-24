@@ -153,6 +153,58 @@ userApi.post("/tokens", async (c) => {
 });
 
 /**
+ * Updates a user's token (name, allowed_channels).
+ */
+userApi.patch("/tokens/:id", async (c) => {
+	const userId = c.get("userId") as string;
+	const tokenId = c.req.param("id");
+	const body = await c.req.json().catch(() => null);
+	if (!body) {
+		return jsonError(c, 400, "missing_body", "missing_body");
+	}
+
+	const existing = await c.env.DB.prepare(
+		"SELECT id, name, allowed_channels FROM tokens WHERE id = ? AND user_id = ?",
+	)
+		.bind(tokenId, userId)
+		.first<{ id: string; name: string; allowed_channels: string | null }>();
+
+	if (!existing) {
+		return jsonError(c, 404, "token_not_found", "token_not_found");
+	}
+
+	const newName = typeof body.name === "string" && body.name.trim() ? body.name.trim() : existing.name;
+
+	let newAllowedChannels: string | null = existing.allowed_channels;
+	if (body.allowed_channels !== undefined) {
+		if (body.allowed_channels === null) {
+			newAllowedChannels = null;
+		} else if (typeof body.allowed_channels === "object" && !Array.isArray(body.allowed_channels)) {
+			const channelSelectionEnabled = await getUserChannelSelectionEnabled(c.env.DB);
+			if (!channelSelectionEnabled) {
+				return jsonError(c, 403, "channel_selection_disabled", "channel_selection_disabled");
+			}
+			const map = body.allowed_channels as Record<string, unknown>;
+			const cleaned: Record<string, string[]> = {};
+			for (const [modelId, chIds] of Object.entries(map)) {
+				if (Array.isArray(chIds) && chIds.length > 0) {
+					cleaned[modelId] = chIds.filter((v: unknown) => typeof v === "string");
+				}
+			}
+			newAllowedChannels = Object.keys(cleaned).length > 0 ? JSON.stringify(cleaned) : null;
+		}
+	}
+
+	await c.env.DB.prepare(
+		"UPDATE tokens SET name = ?, allowed_channels = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+	)
+		.bind(newName, newAllowedChannels, nowIso(), tokenId, userId)
+		.run();
+
+	return c.json({ ok: true });
+});
+
+/**
  * Deletes a user's token.
  */
 userApi.delete("/tokens/:id", async (c) => {

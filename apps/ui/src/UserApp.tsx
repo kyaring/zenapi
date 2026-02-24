@@ -228,6 +228,22 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		[apiFetch, loadTokens],
 	);
 
+	const handleTokenUpdate = useCallback(
+		async (id: string, allowedChannels: Record<string, string[]> | null) => {
+			try {
+				await apiFetch(`/api/u/tokens/${id}`, {
+					method: "PATCH",
+					body: JSON.stringify({ allowed_channels: allowedChannels }),
+				});
+				await loadTokens();
+				setNotice("令牌已更新");
+			} catch (error) {
+				setNotice((error as Error).message);
+			}
+		},
+		[apiFetch, loadTokens],
+	);
+
 	const handleTokenDelete = useCallback(
 		async (id: string) => {
 			try {
@@ -300,6 +316,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 				<UserTokensView
 					tokens={tokens}
 					onCreate={handleTokenCreate}
+					onUpdate={handleTokenUpdate}
 					onDelete={handleTokenDelete}
 					onReveal={handleTokenReveal}
 					models={models}

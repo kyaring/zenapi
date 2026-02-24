@@ -5,41 +5,76 @@ import { formatDateTime } from "../core/utils";
 type UserTokensViewProps = {
 	tokens: Token[];
 	onCreate: (name: string, allowedChannels?: Record<string, string[]>) => void;
+	onUpdate: (id: string, allowedChannels: Record<string, string[]> | null) => void;
 	onDelete: (id: string) => void;
 	onReveal: (id: string) => void;
 	models?: PublicModelItem[];
 	channelSelectionEnabled?: boolean;
 };
 
+type ModalMode = { type: "create" } | { type: "edit"; token: Token };
+
 export const UserTokensView = ({
 	tokens,
 	onCreate,
+	onUpdate,
 	onDelete,
 	onReveal,
 	models,
 	channelSelectionEnabled,
 }: UserTokensViewProps) => {
-	const [showModal, setShowModal] = useState(false);
+	const [modalMode, setModalMode] = useState<ModalMode | null>(null);
 	const [tokenName, setTokenName] = useState("");
-	// per-model channel selection: { modelId: [channelId, ...] }
 	const [selectedMap, setSelectedMap] = useState<Record<string, string[]>>({});
 	const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
 	const [modelSearch, setModelSearch] = useState("");
 
-	const handleCreate = (e: Event) => {
-		e.preventDefault();
-		if (!tokenName.trim()) return;
-		// Build cleaned map (only entries with selections)
-		const cleaned: Record<string, string[]> = {};
-		for (const [modelId, chIds] of Object.entries(selectedMap)) {
-			if (chIds.length > 0) cleaned[modelId] = chIds;
-		}
-		onCreate(tokenName.trim(), Object.keys(cleaned).length > 0 ? cleaned : undefined);
+	const resetModal = () => {
+		setModalMode(null);
 		setTokenName("");
 		setSelectedMap({});
 		setExpandedModels(new Set());
 		setModelSearch("");
-		setShowModal(false);
+	};
+
+	const openCreate = () => {
+		setTokenName("");
+		setSelectedMap({});
+		setExpandedModels(new Set());
+		setModelSearch("");
+		setModalMode({ type: "create" });
+	};
+
+	const openEdit = (token: Token) => {
+		setTokenName(token.name);
+		const existing = parseAllowedChannels(token.allowed_channels);
+		setSelectedMap(existing ?? {});
+		setExpandedModels(new Set());
+		setModelSearch("");
+		setModalMode({ type: "edit", token });
+	};
+
+	const buildCleanedMap = (): Record<string, string[]> | undefined => {
+		const cleaned: Record<string, string[]> = {};
+		for (const [modelId, chIds] of Object.entries(selectedMap)) {
+			if (chIds.length > 0) cleaned[modelId] = chIds;
+		}
+		return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+	};
+
+	const handleCreate = (e: Event) => {
+		e.preventDefault();
+		if (!tokenName.trim()) return;
+		onCreate(tokenName.trim(), buildCleanedMap());
+		resetModal();
+	};
+
+	const handleEdit = (e: Event) => {
+		e.preventDefault();
+		if (!modalMode || modalMode.type !== "edit") return;
+		const cleaned = buildCleanedMap();
+		onUpdate(modalMode.token.id, cleaned ?? null);
+		resetModal();
 	};
 
 	const toggleModelChannel = (modelId: string, channelId: string) => {
@@ -61,7 +96,6 @@ export const UserTokensView = ({
 		});
 	};
 
-	// Only show models with multiple channels (single-channel = no choice)
 	const multiChannelModels = (models ?? []).filter((m) => m.channels.length > 1);
 	const showChannelSelection = channelSelectionEnabled && multiChannelModels.length > 0;
 
@@ -70,19 +104,6 @@ export const UserTokensView = ({
 		: multiChannelModels;
 
 	const configuredModelCount = Object.values(selectedMap).filter((v) => v.length > 0).length;
-
-	const parseAllowedChannels = (val: string | null | undefined): Record<string, string[]> | null => {
-		if (!val) return null;
-		try {
-			const parsed = JSON.parse(val);
-			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-				return parsed as Record<string, string[]>;
-			}
-			return null;
-		} catch {
-			return null;
-		}
-	};
 
 	return (
 		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -98,7 +119,7 @@ export const UserTokensView = ({
 				<button
 					class="h-10 rounded-lg bg-stone-900 px-4 text-sm font-semibold text-white transition-all hover:shadow-lg"
 					type="button"
-					onClick={() => setShowModal(true)}
+					onClick={openCreate}
 				>
 					创建令牌
 				</button>
@@ -167,6 +188,15 @@ export const UserTokensView = ({
 									</td>
 									<td class="py-2.5">
 										<div class="flex gap-2">
+											{showChannelSelection && (
+												<button
+													type="button"
+													class="text-xs text-stone-500 hover:text-stone-700"
+													onClick={() => openEdit(token)}
+												>
+													编辑
+												</button>
+											)}
 											<button
 												type="button"
 												class="text-xs text-amber-600 hover:text-amber-700"
@@ -191,19 +221,20 @@ export const UserTokensView = ({
 				</div>
 			)}
 
-			{/* Create modal */}
-			{showModal && (
+			{/* Create / Edit modal */}
+			{modalMode && (
 				<div class="fixed inset-0 z-50 flex items-center justify-center">
 					<button
 						type="button"
 						class="absolute inset-0 bg-stone-900/40"
-						onClick={() => setShowModal(false)}
+						onClick={resetModal}
 					/>
 					<div class={`relative z-10 w-full ${showChannelSelection ? "max-w-2xl" : "max-w-md"} max-h-[90vh] overflow-y-auto rounded-2xl border border-stone-200 bg-white p-6 shadow-xl`}>
 						<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
-							创建令牌
+							{modalMode.type === "create" ? "创建令牌" : "编辑令牌"}
 						</h3>
-						<form onSubmit={handleCreate}>
+						<form onSubmit={modalMode.type === "create" ? handleCreate : handleEdit}>
+							{modalMode.type === "create" && (
 							<div class="mb-4">
 								<label
 									class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
@@ -225,6 +256,15 @@ export const UserTokensView = ({
 									}
 								/>
 							</div>
+							)}
+							{modalMode.type === "edit" && (
+							<div class="mb-4">
+								<p class="text-sm text-stone-600">
+									令牌: <span class="font-medium">{modalMode.token.name}</span>
+									<span class="ml-2 font-mono text-xs text-stone-400">{modalMode.token.key_prefix}...</span>
+								</p>
+							</div>
+							)}
 							{showChannelSelection && (
 							<div class="mb-4">
 								<div class="mb-1.5 flex items-center justify-between">
@@ -313,7 +353,7 @@ export const UserTokensView = ({
 								<button
 									type="button"
 									class="h-10 rounded-lg border border-stone-200 px-4 text-sm text-stone-500 hover:text-stone-900"
-									onClick={() => setShowModal(false)}
+									onClick={resetModal}
 								>
 									取消
 								</button>
@@ -321,7 +361,7 @@ export const UserTokensView = ({
 									type="submit"
 									class="h-10 rounded-lg bg-stone-900 px-4 text-sm font-semibold text-white transition-all hover:shadow-lg"
 								>
-									创建
+									{modalMode.type === "create" ? "创建" : "保存"}
 								</button>
 							</div>
 						</form>
@@ -331,3 +371,16 @@ export const UserTokensView = ({
 		</div>
 	);
 };
+
+function parseAllowedChannels(val: string | null | undefined): Record<string, string[]> | null {
+	if (!val) return null;
+	try {
+		const parsed = JSON.parse(val);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as Record<string, string[]>;
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
