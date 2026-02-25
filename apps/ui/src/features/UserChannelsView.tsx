@@ -495,58 +495,62 @@ export const UserChannelsView = ({
 									</div>
 								)}
 								{/* All matching channels */}
-								{channels.length > 0 && (
-									<div class="mb-3">
-										<p class="mb-1 text-xs font-medium text-stone-500">匹配渠道 ({channels.length})</p>
-										<div class="overflow-x-auto">
-											<table class="w-full text-left text-xs">
-												<thead>
-													<tr class="border-b border-stone-100 text-stone-400">
-														<th class="pb-1 pr-3 font-medium">名称</th>
-														<th class="pb-1 pr-3 font-medium">状态</th>
-														<th class="pb-1 pr-3 font-medium">提交者</th>
-														<th class="pb-1 font-medium">操作</th>
+								<div class="mb-3">
+									<p class="mb-1 text-xs font-medium text-stone-500">匹配渠道 ({channels.length})</p>
+									{channels.length > 0 ? (
+									<div class="overflow-x-auto">
+										<table class="w-full text-left text-xs">
+											<thead>
+												<tr class="border-b border-stone-100 text-stone-400">
+													<th class="pb-1 pr-3 font-medium">名称</th>
+													<th class="pb-1 pr-3 font-medium">状态</th>
+													<th class="pb-1 pr-3 font-medium">提交者</th>
+													<th class="pb-1 font-medium">操作</th>
+												</tr>
+											</thead>
+											<tbody>
+												{channels.map((ch) => (
+													<tr key={ch.id} class="border-b border-stone-50">
+														<td class="py-1.5 pr-3 text-stone-700">{ch.name}</td>
+														<td class="py-1.5 pr-3">
+															<span class={`rounded-full px-2 py-0.5 text-xs ${ch.status === "active" ? "bg-emerald-50 text-emerald-600" : ch.status === "pending" ? "bg-amber-50 text-amber-600" : "bg-stone-100 text-stone-500"}`}>
+																{ch.status}
+															</span>
+														</td>
+														<td class="py-1.5 pr-3 text-stone-500">{ch.user_name ?? "-"}</td>
+														<td class="py-1.5">
+															<button
+																type="button"
+																class="text-xs text-red-500 hover:text-red-600"
+																onClick={() => handleMaintainerDeleteChannel(ch.id)}
+															>
+																删除
+															</button>
+														</td>
 													</tr>
-												</thead>
-												<tbody>
-													{channels.map((ch) => (
-														<tr key={ch.id} class="border-b border-stone-50">
-															<td class="py-1.5 pr-3 text-stone-700">{ch.name}</td>
-															<td class="py-1.5 pr-3">
-																<span class={`rounded-full px-2 py-0.5 text-xs ${ch.status === "active" ? "bg-emerald-50 text-emerald-600" : ch.status === "pending" ? "bg-amber-50 text-amber-600" : "bg-stone-100 text-stone-500"}`}>
-																	{ch.status}
-																</span>
-															</td>
-															<td class="py-1.5 pr-3 text-stone-500">{ch.user_name ?? "-"}</td>
-															<td class="py-1.5">
-																<button
-																	type="button"
-																	class="text-xs text-red-500 hover:text-red-600"
-																	onClick={() => handleMaintainerDeleteChannel(ch.id)}
-																>
-																	删除
-																</button>
-															</td>
-														</tr>
-													))}
-												</tbody>
-											</table>
-										</div>
+												))}
+											</tbody>
+										</table>
 									</div>
-								)}
+									) : (
+										<p class="text-xs text-stone-400">暂无</p>
+									)}
+								</div>
 								{/* Violations */}
-								{violations.length > 0 && (
-									<div>
-										<p class="mb-1 text-xs font-medium text-red-500">违规记录 ({violations.length})</p>
-										<div class="space-y-1">
-											{violations.map((v) => (
-												<div key={v.id} class="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-600">
-													{v.user_name} ({v.linuxdo_username ?? "-"}) 尝试提交 {v.attempted_base_url} - {v.created_at?.slice(0, 16)}
-												</div>
-											))}
-										</div>
+								<div>
+									<p class="mb-1 text-xs font-medium text-red-500">违规记录 ({violations.length})</p>
+									{violations.length > 0 ? (
+									<div class="space-y-1">
+										{violations.map((v) => (
+											<div key={v.id} class="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-600">
+												{v.user_name} ({v.linuxdo_username ?? "-"}) 尝试提交 {v.attempted_base_url} - {v.created_at?.slice(0, 16)}
+											</div>
+										))}
 									</div>
-								)}
+									) : (
+										<p class="text-xs text-stone-400">暂无</p>
+									)}
+								</div>
 							</div>
 						);
 					})}
@@ -598,7 +602,7 @@ export const UserChannelsView = ({
 					type="button"
 					onClick={openCreate}
 				>
-					贡献渠道
+					添加渠道
 				</button>
 			</div>
 
