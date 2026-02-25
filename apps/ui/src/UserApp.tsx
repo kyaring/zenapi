@@ -497,7 +497,9 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 						{notice}
 					</div>
 				)}
-				{renderContent()}
+				<div key={activeTab}>
+					{renderContent()}
+				</div>
 			</main>
 		</div>
 	);

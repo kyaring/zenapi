@@ -424,7 +424,7 @@ export const UserChannelsView = ({
 				</div>
 			)}
 			{mySites.length > 0 ? (
-				<div class="space-y-4">
+				<div key="sites-list" class="space-y-4">
 					{mySites.map((site) => {
 						const isBlocked = (site.blocked ?? []).length > 0;
 						const channels = siteChannels[site.id] ?? [];
@@ -556,10 +556,10 @@ export const UserChannelsView = ({
 					})}
 				</div>
 			) : (
-				<p class="text-sm text-stone-400">你暂未维护任何公益站</p>
+				<p key="sites-empty" class="text-sm text-stone-400">你暂未维护任何公益站</p>
 			)}
 			{/* Claim site */}
-			<div class="mt-4 border-t border-stone-100 pt-4">
+			<div key="claim" class="mt-4 border-t border-stone-100 pt-4">
 				<p class="mb-2 text-xs font-medium text-stone-500">声明维护站点</p>
 				{claimNotice && (
 					<div class="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">

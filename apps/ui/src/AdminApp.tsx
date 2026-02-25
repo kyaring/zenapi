@@ -1046,7 +1046,9 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 			onLogout={handleLogout}
 			onNavigate={onNavigate}
 		>
-			{renderContent()}
+			<div key={activeTab}>
+				{renderContent()}
+			</div>
 		</AppLayout>
 	);
 };
