@@ -284,6 +284,7 @@ export type UserDashboardData = {
 
 export type UserTabId =
 	| "dashboard"
+	| "monitoring"
 	| "models"
 	| "tokens"
 	| "usage"

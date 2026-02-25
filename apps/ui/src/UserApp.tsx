@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "hono/jsx/dom"
 import { createApiFetch } from "./core/api";
 import { userTabs } from "./core/constants";
 import type {
+	MonitoringData,
 	PublicModelItem,
 	SiteMode,
 	Token,
@@ -15,6 +16,7 @@ import { UserModelsView } from "./features/UserModelsView";
 import { UserTokensView } from "./features/UserTokensView";
 import { UserUsageView } from "./features/UserUsageView";
 import { UserChannelsView } from "./features/UserChannelsView";
+import { MonitoringView } from "./features/MonitoringView";
 
 type ChannelItem = {
 	id: string;
@@ -52,6 +54,7 @@ const normalizePath = (path: string) => {
 
 const userTabToPath: Record<UserTabId, string> = {
 	dashboard: "/user",
+	monitoring: "/user/monitoring",
 	models: "/user/models",
 	tokens: "/user/tokens",
 	usage: "/user/usage",
@@ -60,6 +63,7 @@ const userTabToPath: Record<UserTabId, string> = {
 
 const userPathToTab: Record<string, UserTabId> = {
 	"/user": "dashboard",
+	"/user/monitoring": "monitoring",
 	"/user/models": "models",
 	"/user/tokens": "tokens",
 	"/user/usage": "usage",
@@ -80,6 +84,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 	const [channelAliases, setChannelAliases] = useState<Record<string, ModelAliasesMap>>({});
 	const [tokens, setTokens] = useState<Token[]>([]);
 	const [usage, setUsage] = useState<UsageLog[]>([]);
+	const [monitoring, setMonitoring] = useState<MonitoringData | null>(null);
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
 
 	// Handle Linux DO bind callback parameters
@@ -146,6 +151,15 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		setChannelAliases(result.channel_aliases ?? {});
 	}, [apiFetch]);
 
+	const loadMonitoring = useCallback(async () => {
+		const data = await apiFetch<MonitoringData>("/api/monitoring?range=15m");
+		setMonitoring(data);
+	}, [apiFetch]);
+
+	const handleMonitoringLoaded = useCallback((data: MonitoringData) => {
+		setMonitoring(data);
+	}, []);
+
 	const loadedTabs = useRef<Set<string>>(new Set<string>());
 
 	const loadTab = useCallback(
@@ -154,6 +168,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 			setNotice("");
 			try {
 				if (tabId === "dashboard") await loadDashboard();
+				if (tabId === "monitoring") await loadMonitoring();
 				if (tabId === "models") await loadModels();
 				if (tabId === "tokens") { await loadTokens(); await loadModels(); }
 				if (tabId === "usage") await loadUsage();
@@ -165,7 +180,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 				setLoading(false);
 			}
 		},
-		[loadDashboard, loadModels, loadTokens, loadUsage, loadChannels],
+		[loadDashboard, loadMonitoring, loadModels, loadTokens, loadUsage, loadChannels],
 	);
 
 	useEffect(() => {
@@ -307,6 +322,9 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		}
 		if (activeTab === "dashboard") {
 			return <UserDashboard data={dashboardData} user={user} token={token} updateToken={updateToken} linuxdoEnabled={linuxdoEnabled} onUnbind={handleLinuxdoUnbind} onUserRefresh={onUserRefresh} />;
+		}
+		if (activeTab === "monitoring") {
+			return <MonitoringView monitoring={monitoring} token={token} onLoaded={handleMonitoringLoaded} />;
 		}
 		if (activeTab === "models") {
 			return <UserModelsView models={models} />;

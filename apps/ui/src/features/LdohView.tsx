@@ -9,8 +9,10 @@ type LdohViewProps = {
 	onSync: () => Promise<void>;
 	onBlockAll: () => Promise<void>;
 	onAddSite: (apiBaseUrl: string, maintainerUsername: string, name: string) => Promise<void>;
-	onEditSite: (id: string, data: { name?: string; description?: string; apiBaseUrl?: string }) => Promise<void>;
+	onEditSite: (id: string, data: { name?: string; description?: string; apiBaseUrls?: string }) => Promise<void>;
 	onDeleteSite: (id: string) => Promise<void>;
+	onAddMaintainer: (siteId: string, username: string) => Promise<void>;
+	onRemoveMaintainer: (maintainerId: string) => Promise<void>;
 	onApproveMaintainer: (id: string) => Promise<void>;
 	onRejectMaintainer: (id: string) => Promise<void>;
 	onApproveChannel: (id: string) => Promise<void>;
@@ -27,6 +29,8 @@ export const LdohView = ({
 	onAddSite,
 	onEditSite,
 	onDeleteSite,
+	onAddMaintainer,
+	onRemoveMaintainer,
 	onApproveMaintainer,
 	onRejectMaintainer,
 	onApproveChannel,
@@ -39,7 +43,8 @@ export const LdohView = ({
 	const [addName, setAddName] = useState("");
 	const [addNotice, setAddNotice] = useState("");
 	const [editingSite, setEditingSite] = useState<LdohSite | null>(null);
-	const [editForm, setEditForm] = useState({ name: "", description: "", apiBaseUrl: "" });
+	const [editForm, setEditForm] = useState({ name: "", description: "", apiBaseUrls: "" });
+	const [newMaintainer, setNewMaintainer] = useState("");
 
 	const handleSync = useCallback(async () => {
 		setSyncing(true);
@@ -76,8 +81,9 @@ export const LdohView = ({
 		setEditForm({
 			name: site.name,
 			description: site.description ?? "",
-			apiBaseUrl: site.api_base_url,
+			apiBaseUrls: (site.api_base_url ?? "").split("\n").filter(Boolean).join("\n"),
 		});
+		setNewMaintainer("");
 	}, []);
 
 	const handleEditSubmit = useCallback(async (e: Event) => {
@@ -86,15 +92,30 @@ export const LdohView = ({
 		await onEditSite(editingSite.id, {
 			name: editForm.name.trim(),
 			description: editForm.description.trim(),
-			apiBaseUrl: editForm.apiBaseUrl.trim(),
+			apiBaseUrls: editForm.apiBaseUrls.trim(),
 		});
 		setEditingSite(null);
 	}, [editingSite, editForm, onEditSite]);
+
+	const handleAddMaintainerInModal = useCallback(async () => {
+		if (!editingSite || !newMaintainer.trim()) return;
+		await onAddMaintainer(editingSite.id, newMaintainer.trim());
+		setNewMaintainer("");
+	}, [editingSite, newMaintainer, onAddMaintainer]);
+
+	const handleRemoveMaintainerInModal = useCallback(async (maintainerId: string) => {
+		await onRemoveMaintainer(maintainerId);
+	}, [onRemoveMaintainer]);
 
 	const handleDelete = useCallback(async (id: string) => {
 		if (!window.confirm("确定要删除该站点吗？关联的维护者、封禁和违规记录将一并删除。")) return;
 		await onDeleteSite(id);
 	}, [onDeleteSite]);
+
+	// Refresh editingSite from sites list after maintainer changes
+	const currentEditingSite = editingSite
+		? sites.find((s) => s.id === editingSite.id) ?? editingSite
+		: null;
 
 	return (
 		<div class="space-y-5">
@@ -303,8 +324,10 @@ export const LdohView = ({
 												{site.source === "ldoh" ? "LDOH" : "手动"}
 											</div>
 										</td>
-										<td class="py-2.5 pr-4 text-xs text-stone-500 max-w-[200px] truncate">
-											{site.api_base_hostname}
+										<td class="py-2.5 pr-4 text-xs text-stone-500 max-w-[200px]">
+											{String(site.api_base_hostname ?? "").split(",").map((h, i) => (
+												<div key={i} class="truncate">{h.trim()}</div>
+											))}
 										</td>
 										<td class="py-2.5 pr-4">
 											{(site.maintainers ?? []).map((m) => (
@@ -395,16 +418,16 @@ export const LdohView = ({
 			)}
 
 			{/* Edit site modal */}
-			{editingSite && (
+			{currentEditingSite && (
 				<div class="fixed inset-0 z-50 flex items-center justify-center">
 					<button
 						type="button"
 						class="absolute inset-0 bg-stone-900/40"
 						onClick={() => setEditingSite(null)}
 					/>
-					<div class="relative z-10 w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl">
+					<div class="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-stone-200 bg-white p-6 shadow-xl">
 						<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
-							编辑站点: {editingSite.name}
+							编辑站点: {currentEditingSite.name}
 						</h3>
 						<form class="grid gap-4" onSubmit={handleEditSubmit}>
 							<div>
@@ -442,21 +465,71 @@ export const LdohView = ({
 							</div>
 							<div>
 								<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
-									API Base URL
+									API Base URL（一行一个）
 								</label>
-								<input
-									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-									type="text"
+								<textarea
+									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm font-mono text-stone-900 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+									rows={3}
 									required
-									value={editForm.apiBaseUrl}
+									value={editForm.apiBaseUrls}
 									onInput={(e) =>
 										setEditForm((p) => ({
 											...p,
-											apiBaseUrl: (e.currentTarget as HTMLInputElement)?.value ?? "",
+											apiBaseUrls: (e.currentTarget as HTMLTextAreaElement)?.value ?? "",
 										}))
 									}
 								/>
 							</div>
+
+							{/* Maintainer management */}
+							<div>
+								<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
+									维护者
+								</label>
+								<div class="space-y-2">
+									{(currentEditingSite.maintainers ?? []).map((m) => (
+										<div key={m.id} class="flex items-center justify-between rounded-lg border border-stone-100 px-3 py-2">
+											<div class="flex items-center gap-2">
+												<span class="text-sm text-stone-700">{m.username}</span>
+												<span class={`rounded-full px-2 py-0.5 text-xs ${
+													m.approved
+														? "bg-emerald-50 text-emerald-600"
+														: "bg-amber-50 text-amber-600"
+												}`}>
+													{m.source === "ldoh" ? "LDOH" : "手动"}{m.approved ? "" : " (待审)"}
+												</span>
+											</div>
+											<button
+												type="button"
+												class="text-xs text-red-500 hover:text-red-600"
+												onClick={() => handleRemoveMaintainerInModal(m.id)}
+											>
+												删除
+											</button>
+										</div>
+									))}
+									{(currentEditingSite.maintainers ?? []).length === 0 && (
+										<p class="text-xs text-stone-400">暂无维护者</p>
+									)}
+									<div class="flex gap-2 mt-2">
+										<input
+											type="text"
+											placeholder="LinuxDO 用户名或主页链接"
+											value={newMaintainer}
+											onInput={(e) => setNewMaintainer((e.target as HTMLInputElement).value)}
+											class="flex-1 rounded-lg border border-stone-200 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+										/>
+										<button
+											type="button"
+											class="rounded-lg bg-stone-800 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-700"
+											onClick={handleAddMaintainerInModal}
+										>
+											添加
+										</button>
+									</div>
+								</div>
+							</div>
+
 							<div class="flex justify-end gap-3">
 								<button
 									type="button"

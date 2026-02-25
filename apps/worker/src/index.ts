@@ -120,7 +120,8 @@ app.use("/api/*", async (c, next) => {
 		p === "/api/group" || p.startsWith("/api/group/") ||
 		p.startsWith("/api/public") ||
 		p.startsWith("/api/u/") ||
-		p.startsWith("/api/recharge")
+		p.startsWith("/api/recharge") ||
+		p.startsWith("/api/monitoring")
 	) {
 		return next();
 	}

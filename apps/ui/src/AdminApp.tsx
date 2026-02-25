@@ -569,7 +569,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		setNotice(`已封禁 ${result.blocked} 个站点`);
 	}, [apiFetch, loadLdoh]);
 
-	const handleLdohEditSite = useCallback(async (id: string, data: { name?: string; description?: string; apiBaseUrl?: string }) => {
+	const handleLdohEditSite = useCallback(async (id: string, data: { name?: string; description?: string; apiBaseUrls?: string }) => {
 		await apiFetch(`/api/ldoh/sites/${id}`, {
 			method: "PATCH",
 			body: JSON.stringify(data),
@@ -582,6 +582,19 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		await apiFetch(`/api/ldoh/sites/${id}`, { method: "DELETE" });
 		await loadLdoh();
 		setNotice("站点已删除");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohAddMaintainer = useCallback(async (siteId: string, username: string) => {
+		await apiFetch(`/api/ldoh/sites/${siteId}/maintainers`, {
+			method: "POST",
+			body: JSON.stringify({ username }),
+		});
+		await loadLdoh();
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohRemoveMaintainer = useCallback(async (maintainerId: string) => {
+		await apiFetch(`/api/ldoh/maintainers/${maintainerId}`, { method: "DELETE" });
+		await loadLdoh();
 	}, [apiFetch, loadLdoh]);
 
 	const handleSettingsSubmit = useCallback(
@@ -1043,6 +1056,8 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 					onAddSite={handleLdohAddSite}
 					onEditSite={handleLdohEditSite}
 					onDeleteSite={handleLdohDeleteSite}
+					onAddMaintainer={handleLdohAddMaintainer}
+					onRemoveMaintainer={handleLdohRemoveMaintainer}
 					onApproveMaintainer={handleLdohApproveMaintainer}
 					onRejectMaintainer={handleLdohRejectMaintainer}
 					onApproveChannel={handleLdohApproveChannel}

@@ -23,6 +23,7 @@ export const tabs: TabItem[] = [
 
 export const userTabs: UserTabItem[] = [
 	{ id: "dashboard", label: "仪表盘" },
+	{ id: "monitoring", label: "状态" },
 	{ id: "models", label: "模型广场" },
 	{ id: "tokens", label: "我的令牌" },
 	{ id: "usage", label: "使用日志" },

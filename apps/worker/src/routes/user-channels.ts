@@ -129,9 +129,10 @@ userChannels.post("/", async (c) => {
 			"SELECT id, api_base_hostname FROM ldoh_sites",
 		).all();
 
-		const matchedSite = (sitesResult.results ?? []).find((row) =>
-			hostnameMatches(hostname, String(row.api_base_hostname)),
-		);
+		const matchedSite = (sitesResult.results ?? []).find((row) => {
+			const siteHostnames = String(row.api_base_hostname).split(",").map((h) => h.trim());
+			return siteHostnames.some((h) => hostnameMatches(hostname, h));
+		});
 
 		if (matchedSite) {
 			channelStatus = "pending";

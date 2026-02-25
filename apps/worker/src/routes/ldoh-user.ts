@@ -167,10 +167,11 @@ ldohUser.get("/sites/:id/channels", async (c) => {
 		 ORDER BY c.created_at DESC`,
 	).all();
 
-	// Filter channels whose base_url hostname matches the site hostname (domain suffix match)
+	// Filter channels whose base_url hostname matches any of the site hostnames (domain suffix match)
+	const siteHostnames = String(site.api_base_hostname).split(",").map((h) => h.trim());
 	const matching = (channels.results ?? []).filter((ch) => {
 		const chHostname = extractHostname(String(ch.base_url));
-		return hostnameMatches(chHostname, site.api_base_hostname);
+		return siteHostnames.some((h) => hostnameMatches(chHostname, h));
 	});
 
 	return c.json({ channels: matching });
@@ -208,23 +209,26 @@ ldohUser.post("/sites/:id/block", async (c) => {
 		return jsonError(c, 404, "site_not_found", "site_not_found");
 	}
 
-	const existing = await c.env.DB.prepare(
-		"SELECT id FROM ldoh_blocked_urls WHERE hostname = ?",
-	)
-		.bind(site.api_base_hostname)
-		.first();
+	const hostnames = String(site.api_base_hostname).split(",").map((h) => h.trim()).filter(Boolean);
 
-	if (existing) {
+	// Check if all hostnames are already blocked
+	const existingBlocked = await c.env.DB.prepare(
+		"SELECT hostname FROM ldoh_blocked_urls WHERE site_id = ?",
+	).bind(siteId).all<{ hostname: string }>();
+	const blockedSet = new Set((existingBlocked.results ?? []).map((r) => r.hostname));
+	const newHostnames = hostnames.filter((h) => !blockedSet.has(h));
+
+	if (newHostnames.length === 0) {
 		return c.json({ ok: true, already_blocked: true });
 	}
 
-	const id = crypto.randomUUID();
-	await c.env.DB.prepare(
-		"INSERT INTO ldoh_blocked_urls (id, site_id, hostname, blocked_by, created_at) VALUES (?, ?, ?, ?, ?)",
-	)
-		.bind(id, siteId, site.api_base_hostname, userId, nowIso())
-		.run();
-	await disableNonMaintainerChannels(c.env.DB, siteId, site.api_base_hostname);
+	const now = nowIso();
+	for (const h of newHostnames) {
+		await c.env.DB.prepare(
+			"INSERT INTO ldoh_blocked_urls (id, site_id, hostname, blocked_by, created_at) VALUES (?, ?, ?, ?, ?)",
+		).bind(crypto.randomUUID(), siteId, h, userId, now).run();
+	}
+	await disableNonMaintainerChannels(c.env.DB, siteId, newHostnames);
 
 	return c.json({ ok: true });
 });
@@ -319,9 +323,10 @@ ldohUser.delete("/channels/:channelId", async (c) => {
 		.bind(user.linuxdo_username)
 		.all();
 
-	const maintainerSite = (maintainerSites.results ?? []).find((s) =>
-		hostnameMatches(channelHostname, String(s.api_base_hostname)),
-	);
+	const maintainerSite = (maintainerSites.results ?? []).find((s) => {
+		const hs = String(s.api_base_hostname).split(",").map((h) => h.trim());
+		return hs.some((h) => hostnameMatches(channelHostname, h));
+	});
 
 	if (!maintainerSite) {
 		return jsonError(c, 403, "not_site_maintainer", "你不是匹配此渠道地址的站点维护者");
@@ -365,9 +370,10 @@ ldohUser.post("/channels/:channelId/approve", async (c) => {
 		.bind(user.linuxdo_username)
 		.all();
 
-	const maintainerSite2 = (maintainerSites2.results ?? []).find((s) =>
-		hostnameMatches(channelHostname2, String(s.api_base_hostname)),
-	);
+	const maintainerSite2 = (maintainerSites2.results ?? []).find((s) => {
+		const hs = String(s.api_base_hostname).split(",").map((h) => h.trim());
+		return hs.some((h) => hostnameMatches(channelHostname2, h));
+	});
 
 	if (!maintainerSite2) {
 		return jsonError(c, 403, "not_site_maintainer", "你不是匹配此渠道地址的站点维护者");
@@ -413,9 +419,10 @@ ldohUser.post("/channels/:channelId/reject", async (c) => {
 		.bind(user.linuxdo_username)
 		.all();
 
-	const maintainerSite3 = (maintainerSites3.results ?? []).find((s) =>
-		hostnameMatches(channelHostname3, String(s.api_base_hostname)),
-	);
+	const maintainerSite3 = (maintainerSites3.results ?? []).find((s) => {
+		const hs = String(s.api_base_hostname).split(",").map((h) => h.trim());
+		return hs.some((h) => hostnameMatches(channelHostname3, h));
+	});
 
 	if (!maintainerSite3) {
 		return jsonError(c, 403, "not_site_maintainer", "你不是匹配此渠道地址的站点维护者");
