@@ -47,16 +47,6 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			: null;
 	const isStream = parsedBody?.stream === true;
 
-	// Anti-probe rate limit: block tokens that access too many distinct models in a short window
-	if (model && tokenRecord.user_id) {
-		const recentModels = await c.env.DB.prepare(
-			"SELECT COUNT(DISTINCT model) as cnt FROM usage_logs WHERE token_id = ? AND created_at > datetime('now', '-5 seconds')",
-		).bind(tokenRecord.id).first<{ cnt: number }>();
-		if (recentModels && recentModels.cnt >= 2) {
-			return jsonError(c, 429, "rate_limited", "请求模型种类过多，请稍后再试");
-		}
-	}
-
 	// Resolve per-channel aliases for this model name
 	const channelAliasHits = model ? await loadChannelAliasesByAlias(c.env.DB, model) : [];
 	const channelAliasHitMap = new Map(channelAliasHits.map((h) => [h.channel_id, h]));
