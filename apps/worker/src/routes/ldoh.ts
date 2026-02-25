@@ -8,6 +8,16 @@ import { extractHostname } from "../utils/url";
 
 const ldoh = new Hono<AppEnv>();
 
+/**
+ * Extracts a LinuxDO username from a value that may be a profile URL.
+ * e.g. "https://linux.do/u/wlwlwlwl" → "wlwlwlwl"
+ */
+function parseLinuxDoUsername(value: string): string {
+	const trimmed = value.trim();
+	const match = trimmed.match(/^https?:\/\/linux\.do\/u\/([^/\s]+)/);
+	return match ? match[1] : trimmed;
+}
+
 type LdohApiMaintainer = {
 	name?: string;
 	id?: string;
@@ -101,7 +111,8 @@ ldoh.post("/sync", async (c) => {
 
 		// Process all maintainers (it's an array)
 		for (const m of site.maintainers ?? []) {
-			if (!m.username) continue;
+			const username = parseLinuxDoUsername(m.username || m.profileUrl || "");
+			if (!username) continue;
 			const maintainerId = crypto.randomUUID();
 			await c.env.DB.prepare(
 				`INSERT INTO ldoh_site_maintainers (id, site_id, name, username, linuxdo_id, approved, source)
@@ -114,8 +125,8 @@ ldoh.post("/sync", async (c) => {
 				.bind(
 					maintainerId,
 					siteId,
-					m.name || m.username,
-					m.username,
+					m.name || username,
+					username,
 					m.id || null,
 				)
 				.run();
@@ -124,14 +135,14 @@ ldoh.post("/sync", async (c) => {
 			const localUser = await c.env.DB.prepare(
 				"SELECT id FROM users WHERE linuxdo_username = ?",
 			)
-				.bind(m.username)
+				.bind(username)
 				.first<{ id: string }>();
 
 			if (localUser) {
 				await c.env.DB.prepare(
 					"UPDATE ldoh_site_maintainers SET user_id = ? WHERE site_id = ? AND username = ?",
 				)
-					.bind(localUser.id, siteId, m.username)
+					.bind(localUser.id, siteId, username)
 					.run();
 			}
 			syncedMaintainers++;

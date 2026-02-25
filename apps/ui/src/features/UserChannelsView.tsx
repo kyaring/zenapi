@@ -420,7 +420,7 @@ export const UserChannelsView = ({
 	return (
 		<div class="space-y-5">
 		{/* Maintainer panel */}
-		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+		<div key="maintainer-panel" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
 			<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
 				站点维护
 			</h3>
@@ -593,7 +593,7 @@ export const UserChannelsView = ({
 		</div>
 
 		{/* Channels table */}
-		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+		<div key="channels-panel" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
 			<div class="mb-4 flex items-center justify-between">
 				<div class="flex items-center gap-3">
 					<h3 class="font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
