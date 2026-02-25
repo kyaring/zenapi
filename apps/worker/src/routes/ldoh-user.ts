@@ -90,6 +90,11 @@ ldohUser.post("/claim-site", async (c) => {
 			.bind(siteId, hostname, apiBaseUrl, hostname, now)
 			.run();
 		site = { id: siteId, name: hostname };
+
+		// Auto-block by default
+		await c.env.DB.prepare(
+			"INSERT INTO ldoh_blocked_urls (id, site_id, hostname, blocked_by, created_at) VALUES (?, ?, ?, 'system', ?)",
+		).bind(crypto.randomUUID(), siteId, hostname, now).run();
 	}
 
 	// Check if already a maintainer

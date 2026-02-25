@@ -84,6 +84,16 @@ ldoh.post("/sync", async (c) => {
 			.run();
 		syncedSites++;
 
+		// Auto-block by default
+		const existingBlock = await c.env.DB.prepare(
+			"SELECT id FROM ldoh_blocked_urls WHERE site_id = ?",
+		).bind(siteId).first();
+		if (!existingBlock) {
+			await c.env.DB.prepare(
+				"INSERT INTO ldoh_blocked_urls (id, site_id, hostname, blocked_by, created_at) VALUES (?, ?, ?, 'system', ?)",
+			).bind(crypto.randomUUID(), siteId, hostname, now).run();
+		}
+
 		// Process all maintainers (it's an array)
 		for (const m of site.maintainers ?? []) {
 			if (!m.username) continue;
@@ -164,6 +174,16 @@ ldoh.post("/sites", async (c) => {
 		)
 			.bind(siteId, siteName, apiBaseUrl, hostname, now)
 			.run();
+	}
+
+	// Auto-block by default
+	const existingBlock = await c.env.DB.prepare(
+		"SELECT id FROM ldoh_blocked_urls WHERE site_id = ?",
+	).bind(siteId).first();
+	if (!existingBlock) {
+		await c.env.DB.prepare(
+			"INSERT INTO ldoh_blocked_urls (id, site_id, hostname, blocked_by, created_at) VALUES (?, ?, ?, 'system', ?)",
+		).bind(crypto.randomUUID(), siteId, hostname, now).run();
 	}
 
 	if (maintainerUsername) {
