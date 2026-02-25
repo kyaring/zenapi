@@ -289,6 +289,27 @@ export const SettingsView = ({
 			</div>
 			)}
 			{settingsForm.site_mode === "shared" && (
+			<div class="lg:col-span-2">
+				<label class="flex items-center gap-2 text-sm text-stone-700">
+					<input
+						type="checkbox"
+						class="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+						checked={settingsForm.channel_review_enabled === "true"}
+						onChange={(event) => {
+							const target = event.currentTarget as HTMLInputElement | null;
+							onFormChange({
+								channel_review_enabled: target?.checked ? "true" : "false",
+							});
+						}}
+					/>
+					用户贡献渠道需审核
+				</label>
+				<p class="mt-1 ml-6 text-xs text-stone-500">
+					开启后，用户贡献的所有渠道都需要管理员审核后才能启用
+				</p>
+			</div>
+			)}
+			{settingsForm.site_mode === "shared" && (
 			<div class="lg:col-span-2 border-t border-stone-100 pt-4 mt-1">
 				<label
 					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"

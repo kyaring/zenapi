@@ -429,6 +429,27 @@ export async function setWithdrawalMode(
 	await upsertSetting(db, WITHDRAWAL_MODE_KEY, mode);
 }
 
+// Channel review: require admin approval for user-contributed channels
+const CHANNEL_REVIEW_ENABLED_KEY = "channel_review_enabled";
+
+/**
+ * Returns whether channel contribution review is enabled.
+ */
+export async function getChannelReviewEnabled(db: D1Database): Promise<boolean> {
+	const value = await readSetting(db, CHANNEL_REVIEW_ENABLED_KEY);
+	return value === "true";
+}
+
+/**
+ * Updates the channel review enabled setting.
+ */
+export async function setChannelReviewEnabled(
+	db: D1Database,
+	enabled: boolean,
+): Promise<void> {
+	await upsertSetting(db, CHANNEL_REVIEW_ENABLED_KEY, enabled ? "true" : "false");
+}
+
 // LDOH cookie for syncing public sites
 const LDOH_COOKIE_KEY = "ldoh_cookie";
 

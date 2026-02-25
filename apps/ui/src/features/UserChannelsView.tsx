@@ -29,6 +29,8 @@ type ChannelItem = {
 	api_format: string;
 	status: string;
 	charge_enabled?: number | null;
+	stream_only?: number | null;
+	contribution_note?: string | null;
 	created_at: string;
 };
 
@@ -39,6 +41,8 @@ type ChannelFormData = {
 	api_format: ChannelApiFormat;
 	models: string;
 	charge_enabled: boolean;
+	stream_only: boolean;
+	contribution_note: string;
 };
 
 type ModelPricingConfig = {
@@ -53,6 +57,8 @@ const emptyForm: ChannelFormData = {
 	api_format: "openai",
 	models: "",
 	charge_enabled: false,
+	stream_only: false,
+	contribution_note: "",
 };
 
 function parseModelsJsonToText(modelsJson?: string): string {
@@ -111,6 +117,7 @@ type UserChannelsViewProps = {
 	channels: ChannelItem[];
 	channelAliases: Record<string, ModelAliasesMap>;
 	onRefresh: () => Promise<void>;
+	channelReviewEnabled: boolean;
 };
 
 export const UserChannelsView = ({
@@ -119,6 +126,7 @@ export const UserChannelsView = ({
 	channels,
 	channelAliases,
 	onRefresh,
+	channelReviewEnabled,
 }: UserChannelsViewProps) => {
 	const [showModal, setShowModal] = useState(false);
 	const [editingChannel, setEditingChannel] = useState<ChannelItem | null>(null);
@@ -244,6 +252,8 @@ export const UserChannelsView = ({
 			api_format: (ch.api_format ?? "openai") as ChannelApiFormat,
 			models: parseModelsJsonToText(ch.models_json),
 			charge_enabled: ch.charge_enabled === 1,
+			stream_only: ch.stream_only === 1,
+			contribution_note: ch.contribution_note ?? "",
 		});
 		// Initialize alias state from per-channel aliases for this channel
 		const perChannelMap = channelAliases[ch.id] ?? {};
@@ -311,6 +321,8 @@ export const UserChannelsView = ({
 					models: models.length > 0 ? models : undefined,
 					model_aliases: Object.keys(modelAliasPayload).length > 0 ? modelAliasPayload : undefined,
 					charge_enabled: form.charge_enabled,
+					stream_only: form.stream_only,
+					contribution_note: form.contribution_note.trim() || undefined,
 				};
 				if (editingChannel) {
 					await apiFetch(`/api/u/channels/${editingChannel.id}`, {
@@ -595,6 +607,11 @@ export const UserChannelsView = ({
 
 		{/* Channels table */}
 		<div key="channels-panel" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+			{channelReviewEnabled && (
+				<div class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+					禁止分发其他公益站的 API。提交的渠道需要管理员审核后才能启用。
+				</div>
+			)}
 			<div class="mb-4 flex items-center justify-between">
 				<div class="flex items-center gap-3">
 					<h3 class="font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
@@ -937,8 +954,31 @@ export const UserChannelsView = ({
 									</div>
 								</div>
 							)}
+							{/* Contribution note */}
+							{channelReviewEnabled && (
+							<div>
+								<label class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500">
+									贡献说明
+								</label>
+								<textarea
+									class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+									rows={2}
+									placeholder="简要说明渠道来源（审核时参考）"
+									value={form.contribution_note}
+									onInput={(e) =>
+										setForm((prev) => ({
+											...prev,
+											contribution_note:
+												(
+													e.currentTarget as HTMLTextAreaElement
+												)?.value ?? "",
+										}))
+									}
+								/>
+							</div>
+							)}
 							{/* Charge toggle */}
-							<div class="border-t border-stone-100 pt-3">
+							<div class="border-t border-stone-100 pt-3 space-y-3">
 								<label class="flex items-center gap-2 text-sm text-stone-700">
 									<input
 										type="checkbox"
@@ -953,8 +993,25 @@ export const UserChannelsView = ({
 									/>
 									启用收费
 								</label>
-								<p class="mt-1 ml-6 text-xs text-stone-500">
+								<p class="ml-6 text-xs text-stone-500">
 									开启后，其他用户调用此渠道的模型时产生的费用将计入你的余额（需管理员开启全局收费开关）
+								</p>
+								<label class="flex items-center gap-2 text-sm text-stone-700">
+									<input
+										type="checkbox"
+										class="h-4 w-4 rounded border-stone-300 text-amber-500 focus:ring-amber-400"
+										checked={form.stream_only}
+										onChange={(e) =>
+											setForm((prev) => ({
+												...prev,
+												stream_only: (e.currentTarget as HTMLInputElement).checked,
+											}))
+										}
+									/>
+									仅流式调用
+								</label>
+								<p class="ml-6 text-xs text-stone-500">
+									开启后，非流式请求不会路由到此渠道
 								</p>
 							</div>
 							<div class="flex justify-end gap-3">

@@ -5,7 +5,7 @@ import { userAuth } from "../middleware/userAuth";
 import { extractModelPricings, extractModelIds, extractSharedModelPricings } from "../services/channel-models";
 import { listActiveChannels } from "../services/channel-repo";
 import { loadAllChannelAliasesGrouped } from "../services/model-aliases";
-import { getCheckinReward, getLdcExchangeRate, getLdcPaymentEnabled, getSiteMode, getUserChannelSelectionEnabled, getWithdrawalEnabled, getWithdrawalFeeRate } from "../services/settings";
+import { getCheckinReward, getChannelReviewEnabled, getLdcExchangeRate, getLdcPaymentEnabled, getSiteMode, getUserChannelSelectionEnabled, getWithdrawalEnabled, getWithdrawalFeeRate } from "../services/settings";
 import { generateToken, sha256Hex } from "../utils/crypto";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
@@ -353,6 +353,7 @@ userApi.get("/dashboard", async (c) => {
 	const withdrawalEnabled = await getWithdrawalEnabled(c.env.DB);
 	const withdrawalFeeRate = await getWithdrawalFeeRate(c.env.DB);
 	const userChannelSelectionEnabled = await getUserChannelSelectionEnabled(c.env.DB);
+	const channelReviewEnabled = await getChannelReviewEnabled(c.env.DB);
 	const todayStr = new Date().toISOString().slice(0, 10);
 	const checkinRow = await c.env.DB.prepare(
 		"SELECT id FROM user_checkins WHERE user_id = ? AND checkin_date = ?",
@@ -453,6 +454,7 @@ userApi.get("/dashboard", async (c) => {
 		withdrawal_enabled: withdrawalEnabled,
 		withdrawal_fee_rate: withdrawalFeeRate,
 		user_channel_selection_enabled: userChannelSelectionEnabled,
+		channel_review_enabled: channelReviewEnabled,
 		violations: violationRows,
 	});
 });

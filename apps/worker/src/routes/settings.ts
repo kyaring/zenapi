@@ -3,6 +3,7 @@ import type { AppEnv } from "../env";
 import {
 	getCheckinReward,
 	getChannelFeeEnabled,
+	getChannelReviewEnabled,
 	getDefaultBalance,
 	getLdohCookie,
 	getUserChannelSelectionEnabled,
@@ -23,6 +24,7 @@ import {
 	setAdminPasswordHash,
 	setCheckinReward,
 	setChannelFeeEnabled,
+	setChannelReviewEnabled,
 	setDefaultBalance,
 	setLdohCookie,
 	setUserChannelSelectionEnabled,
@@ -65,6 +67,7 @@ settings.get("/", async (c) => {
 	const ldcEpayGateway = await getLdcEpayGateway(c.env.DB);
 	const ldcExchangeRate = await getLdcExchangeRate(c.env.DB);
 	const channelFeeEnabled = await getChannelFeeEnabled(c.env.DB);
+	const channelReviewEnabled = await getChannelReviewEnabled(c.env.DB);
 	const userChannelSelectionEnabled = await getUserChannelSelectionEnabled(c.env.DB);
 	const defaultBalance = await getDefaultBalance(c.env.DB);
 	const withdrawalEnabled = await getWithdrawalEnabled(c.env.DB);
@@ -85,6 +88,7 @@ settings.get("/", async (c) => {
 		ldc_epay_gateway: ldcEpayGateway,
 		ldc_exchange_rate: ldcExchangeRate,
 		channel_fee_enabled: channelFeeEnabled,
+		channel_review_enabled: channelReviewEnabled,
 		user_channel_selection_enabled: userChannelSelectionEnabled,
 		default_balance: defaultBalance,
 		withdrawal_enabled: withdrawalEnabled,
@@ -225,6 +229,12 @@ settings.put("/", async (c) => {
 	if (body.channel_fee_enabled !== undefined) {
 		const value = body.channel_fee_enabled === true || body.channel_fee_enabled === "true";
 		await setChannelFeeEnabled(c.env.DB, value);
+		touched = true;
+	}
+
+	if (body.channel_review_enabled !== undefined) {
+		const value = body.channel_review_enabled === true || body.channel_review_enabled === "true";
+		await setChannelReviewEnabled(c.env.DB, value);
 		touched = true;
 	}
 

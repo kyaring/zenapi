@@ -3,7 +3,7 @@ import type { AppEnv } from "../env";
 import type { UserRecord } from "../middleware/userAuth";
 import { userAuth } from "../middleware/userAuth";
 import { saveChannelAliases } from "../services/model-aliases";
-import { getSiteMode } from "../services/settings";
+import { getChannelReviewEnabled, getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
 import { extractHostname, hostnameMatches } from "../utils/url";
@@ -29,7 +29,7 @@ userChannels.get("/", async (c) => {
 
 	const userId = c.get("userId") as string;
 	const result = await c.env.DB.prepare(
-		"SELECT id, name, base_url, api_key, models_json, api_format, status, charge_enabled, created_at FROM channels WHERE contributed_by = ? ORDER BY created_at DESC",
+		"SELECT id, name, base_url, api_key, models_json, api_format, status, charge_enabled, stream_only, contribution_note, created_at FROM channels WHERE contributed_by = ? ORDER BY created_at DESC",
 	)
 		.bind(userId)
 		.all();
@@ -92,6 +92,12 @@ userChannels.post("/", async (c) => {
 	const hostname = extractHostname(baseUrl);
 	let channelStatus = "active";
 
+	// Check if channel review is enabled — always require pending
+	const reviewEnabled = await getChannelReviewEnabled(c.env.DB);
+	if (reviewEnabled) {
+		channelStatus = "pending";
+	}
+
 	if (hostname) {
 		// Check if hostname is blocked (domain suffix match)
 		const blockedResult = await c.env.DB.prepare(
@@ -148,7 +154,7 @@ userChannels.post("/", async (c) => {
 	}
 
 	await c.env.DB.prepare(
-		"INSERT INTO channels (id, name, base_url, api_key, weight, status, api_format, models_json, custom_headers_json, contributed_by, charge_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO channels (id, name, base_url, api_key, weight, status, api_format, models_json, custom_headers_json, contributed_by, charge_enabled, stream_only, contribution_note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 	)
 		.bind(
 			id,
@@ -162,6 +168,8 @@ userChannels.post("/", async (c) => {
 			body.custom_headers ? String(body.custom_headers) : null,
 			userId,
 			body.charge_enabled ? 1 : 0,
+			body.stream_only ? 1 : 0,
+			body.contribution_note ? String(body.contribution_note).trim() : null,
 			now,
 			now,
 		)
@@ -205,7 +213,7 @@ userChannels.patch("/:id", async (c) => {
 	const channelId = c.req.param("id");
 
 	const existing = await c.env.DB.prepare(
-		"SELECT id, name, base_url, api_key, api_format, models_json, charge_enabled FROM channels WHERE id = ? AND contributed_by = ?",
+		"SELECT id, name, base_url, api_key, api_format, models_json, charge_enabled, stream_only FROM channels WHERE id = ? AND contributed_by = ?",
 	)
 		.bind(channelId, userId)
 		.first();
@@ -226,7 +234,7 @@ userChannels.patch("/:id", async (c) => {
 	}
 
 	await c.env.DB.prepare(
-		"UPDATE channels SET name = ?, base_url = ?, api_key = ?, api_format = ?, models_json = ?, charge_enabled = ?, updated_at = ? WHERE id = ? AND contributed_by = ?",
+		"UPDATE channels SET name = ?, base_url = ?, api_key = ?, api_format = ?, models_json = ?, charge_enabled = ?, stream_only = ?, updated_at = ? WHERE id = ? AND contributed_by = ?",
 	)
 		.bind(
 			body.name ? String(body.name).trim() : existing.name,
@@ -235,6 +243,7 @@ userChannels.patch("/:id", async (c) => {
 			body.api_format ?? existing.api_format ?? "openai",
 			modelsJson,
 			body.charge_enabled !== undefined ? (body.charge_enabled ? 1 : 0) : (existing.charge_enabled ?? 0),
+			body.stream_only !== undefined ? (body.stream_only ? 1 : 0) : (existing.stream_only ?? 0),
 			now,
 			channelId,
 			userId,

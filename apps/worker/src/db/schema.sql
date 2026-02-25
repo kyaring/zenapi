@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS channels (
   custom_headers_json TEXT,
   contributed_by TEXT,
   charge_enabled INTEGER NOT NULL DEFAULT 0,
+  stream_only INTEGER NOT NULL DEFAULT 0,
+  contribution_note TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

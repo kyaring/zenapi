@@ -27,6 +27,8 @@ type ChannelItem = {
 	api_format: string;
 	status: string;
 	charge_enabled?: number;
+	stream_only?: number;
+	contribution_note?: string;
 	created_at: string;
 };
 
@@ -347,7 +349,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, 
 		}
 		if (activeTab === "channels") {
 			return (
-				<UserChannelsView token={token} updateToken={updateToken} channels={channels} channelAliases={channelAliases} onRefresh={loadChannels} />
+				<UserChannelsView token={token} updateToken={updateToken} channels={channels} channelAliases={channelAliases} onRefresh={loadChannels} channelReviewEnabled={dashboardData?.channel_review_enabled ?? false} />
 			);
 		}
 		return null;
