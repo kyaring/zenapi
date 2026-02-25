@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS channels (
   api_format TEXT NOT NULL DEFAULT 'openai',
   custom_headers_json TEXT,
   contributed_by TEXT,
+  charge_enabled INTEGER NOT NULL DEFAULT 0,
+  stream_only INTEGER NOT NULL DEFAULT 0,
+  contribution_note TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -50,10 +53,13 @@ CREATE TABLE IF NOT EXISTS usage_logs (
   stream INTEGER,
   reasoning_effort TEXT,
   status TEXT,
+  error_code INTEGER,
+  error_message TEXT,
   created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS usage_logs_created_at ON usage_logs(created_at);
+CREATE INDEX IF NOT EXISTS usage_logs_channel_id ON usage_logs(channel_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -75,12 +81,18 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
   balance REAL NOT NULL DEFAULT 0,
+  withdrawable_balance REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
+  linuxdo_id TEXT,
+  linuxdo_username TEXT,
+  tip_url TEXT,
+  invite_code_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS users_email ON users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS users_linuxdo_id ON users(linuxdo_id);
 
 CREATE TABLE IF NOT EXISTS user_sessions (
   id TEXT PRIMARY KEY,
@@ -97,8 +109,122 @@ CREATE TABLE IF NOT EXISTS model_aliases (
   model_id TEXT NOT NULL,
   alias TEXT NOT NULL,
   is_primary INTEGER NOT NULL DEFAULT 0,
+  alias_only INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS model_aliases_alias ON model_aliases(alias);
 CREATE INDEX IF NOT EXISTS model_aliases_model_id ON model_aliases(model_id);
+
+CREATE TABLE IF NOT EXISTS channel_model_aliases (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  alias TEXT NOT NULL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  alias_only INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS channel_model_aliases_ch_alias ON channel_model_aliases(channel_id, alias);
+CREATE INDEX IF NOT EXISTS channel_model_aliases_alias ON channel_model_aliases(alias);
+CREATE INDEX IF NOT EXISTS channel_model_aliases_ch_model ON channel_model_aliases(channel_id, model_id);
+
+CREATE TABLE IF NOT EXISTS user_checkins (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  checkin_date TEXT NOT NULL,
+  reward REAL NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_checkins_user_date ON user_checkins(user_id, checkin_date);
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS invite_codes_code ON invite_codes(code);
+
+CREATE TABLE IF NOT EXISTS recharge_orders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  out_trade_no TEXT NOT NULL UNIQUE,
+  trade_no TEXT,
+  ldc_amount REAL NOT NULL,
+  balance_amount REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS recharge_orders_user ON recharge_orders(user_id);
+CREATE INDEX IF NOT EXISTS recharge_orders_trade ON recharge_orders(out_trade_no);
+
+CREATE TABLE IF NOT EXISTS withdrawal_orders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  out_trade_no TEXT NOT NULL UNIQUE,
+  balance_amount REAL NOT NULL,
+  ldc_amount REAL NOT NULL,
+  fee_amount REAL NOT NULL DEFAULT 0,
+  fee_rate REAL NOT NULL DEFAULT 0,
+  linuxdo_id TEXT NOT NULL,
+  linuxdo_username TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS withdrawal_orders_user ON withdrawal_orders(user_id);
+CREATE INDEX IF NOT EXISTS withdrawal_orders_trade ON withdrawal_orders(out_trade_no);
+
+CREATE TABLE IF NOT EXISTS ldoh_sites (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  api_base_url TEXT NOT NULL,
+  api_base_hostname TEXT NOT NULL,
+  tags_json TEXT,
+  is_visible INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT 'ldoh',
+  synced_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ldoh_sites_hostname ON ldoh_sites(api_base_hostname);
+
+CREATE TABLE IF NOT EXISTS ldoh_site_maintainers (
+  id TEXT PRIMARY KEY,
+  site_id TEXT NOT NULL,
+  user_id TEXT,
+  name TEXT NOT NULL,
+  username TEXT NOT NULL,
+  linuxdo_id TEXT,
+  approved INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'ldoh',
+  UNIQUE(site_id, username)
+);
+CREATE INDEX IF NOT EXISTS ldoh_maintainers_username ON ldoh_site_maintainers(username);
+
+CREATE TABLE IF NOT EXISTS ldoh_blocked_urls (
+  id TEXT PRIMARY KEY,
+  site_id TEXT NOT NULL,
+  hostname TEXT NOT NULL UNIQUE,
+  blocked_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ldoh_violations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  linuxdo_username TEXT,
+  attempted_base_url TEXT NOT NULL,
+  matched_hostname TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  site_name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ldoh_violations_created ON ldoh_violations(created_at);

@@ -16,6 +16,10 @@ import type {
 	Channel,
 	ChannelForm,
 	DashboardData,
+	InviteCode,
+	LdohSite,
+	LdohSiteMaintainer,
+	LdohViolation,
 	ModelItem,
 	MonitoringData,
 	Settings,
@@ -26,6 +30,7 @@ import type {
 	User,
 	UsageLog,
 } from "./core/types";
+import type { ModelAliasesMap } from "./UserApp";
 import { toggleStatus } from "./core/utils";
 import { AppLayout } from "./features/AppLayout";
 import { ChannelsView } from "./features/ChannelsView";
@@ -37,6 +42,7 @@ import { TokensView } from "./features/TokensView";
 import { UsageView } from "./features/UsageView";
 import { UsersView } from "./features/UsersView";
 import { PlaygroundView } from "./features/PlaygroundView";
+import { LdohView } from "./features/LdohView";
 
 type AdminAppProps = {
 	token: string;
@@ -59,6 +65,7 @@ const adminTabToPath: Record<TabId, string> = {
 	settings: "/admin/settings",
 	users: "/admin/users",
 	playground: "/admin/playground",
+	ldoh: "/admin/ldoh",
 };
 
 const adminPathToTab: Record<string, TabId> = {
@@ -71,6 +78,7 @@ const adminPathToTab: Record<string, TabId> = {
 	"/admin/settings": "settings",
 	"/admin/users": "users",
 	"/admin/playground": "playground",
+	"/admin/ldoh": "ldoh",
 };
 
 export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
@@ -93,9 +101,16 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		...initialChannelForm,
 	}));
 	const [isChannelModalOpen, setChannelModalOpen] = useState(false);
+	const [channelModelAliases, setChannelModelAliases] = useState<Record<string, ModelAliasesMap>>({});
+	const [channelAliasState, setChannelAliasState] = useState<ModelAliasesMap>({});
 	const [isTokenModalOpen, setTokenModalOpen] = useState(false);
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
 	const [users, setUsers] = useState<User[]>([]);
+	const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
+	const [ldohSites, setLdohSites] = useState<LdohSite[]>([]);
+	const [ldohViolations, setLdohViolations] = useState<LdohViolation[]>([]);
+	const [ldohPendingMaintainers, setLdohPendingMaintainers] = useState<LdohSiteMaintainer[]>([]);
+	const [ldohPendingChannels, setLdohPendingChannels] = useState<Array<{ id: string; name: string; base_url: string; status: string; user_name?: string; site_name?: string; contribution_note?: string | null }>>([]);
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
@@ -115,8 +130,9 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	}, [apiFetch]);
 
 	const loadChannels = useCallback(async () => {
-		const result = await apiFetch<{ channels: Channel[] }>("/api/channels");
+		const result = await apiFetch<{ channels: Channel[]; channel_aliases?: Record<string, ModelAliasesMap> }>("/api/channels");
 		setData((prev) => ({ ...prev, channels: result.channels }));
+		setChannelModelAliases(result.channel_aliases ?? {});
 	}, [apiFetch]);
 
 	const loadModels = useCallback(async () => {
@@ -139,11 +155,65 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const loadSettings = useCallback(async () => {
 		const settings = await apiFetch<Settings>("/api/settings");
 		setData((prev) => ({ ...prev, settings }));
+		setSettingsForm({
+			log_retention_days: String(settings.log_retention_days ?? 30),
+			session_ttl_hours: String(settings.session_ttl_hours ?? 12),
+			admin_password: "",
+			site_mode: settings.site_mode ?? "personal",
+			registration_mode: settings.registration_mode ?? "open",
+			checkin_reward: String(settings.checkin_reward ?? 0.5),
+			require_invite_code: settings.require_invite_code ? "true" : "false",
+			channel_fee_enabled: settings.channel_fee_enabled ? "true" : "false",
+			channel_review_enabled: settings.channel_review_enabled ? "true" : "false",
+			user_channel_selection_enabled: settings.user_channel_selection_enabled ? "true" : "false",
+			default_balance: String(settings.default_balance ?? 0),
+			withdrawal_enabled: settings.withdrawal_enabled ? "true" : "false",
+			withdrawal_fee_rate: String(settings.withdrawal_fee_rate ?? 0),
+			withdrawal_mode: settings.withdrawal_mode ?? "lenient",
+			ldc_payment_enabled: settings.ldc_payment_enabled ? "true" : "false",
+			ldc_epay_pid: settings.ldc_epay_pid ?? "",
+			ldc_epay_key: settings.ldc_epay_key ?? "",
+			ldc_epay_gateway: settings.ldc_epay_gateway ?? "https://credit.linux.do/epay",
+			ldc_exchange_rate: String(settings.ldc_exchange_rate ?? 0.1),
+			ldoh_cookie: settings.ldoh_cookie ?? "",
+		});
+		if (settings.require_invite_code) {
+			const result = await apiFetch<{ codes: InviteCode[] }>("/api/invite-codes");
+			setInviteCodes(result.codes);
+		}
 	}, [apiFetch]);
 
 	const loadUsers = useCallback(async () => {
 		const result = await apiFetch<{ users: User[] }>("/api/users");
 		setUsers(result.users);
+	}, [apiFetch]);
+
+	const loadLdoh = useCallback(async () => {
+		const sitesResult = await apiFetch<{ sites: LdohSite[] }>("/api/ldoh/sites");
+		setLdohSites(sitesResult.sites);
+
+		const violationsResult = await apiFetch<{ violations: LdohViolation[] }>("/api/ldoh/violations");
+		setLdohViolations(violationsResult.violations);
+
+		// Extract pending maintainers from sites
+		const pending: LdohSiteMaintainer[] = [];
+		for (const site of sitesResult.sites) {
+			for (const m of site.maintainers ?? []) {
+				if (!m.approved) {
+					pending.push(m);
+				}
+			}
+		}
+		setLdohPendingMaintainers(pending);
+
+		// Fetch pending channels
+		const channelsResult = await apiFetch<{ channels: Channel[] }>("/api/channels");
+		const usersResult = await apiFetch<{ users: User[] }>("/api/users");
+		const userMap = new Map((usersResult.users ?? []).map((u) => [u.id, u.name]));
+		const pendingChs = (channelsResult.channels ?? [])
+			.filter((ch) => ch.status === "pending")
+			.map((ch) => ({ id: ch.id, name: ch.name, base_url: ch.base_url, status: ch.status, user_name: ch.contributed_by ? userMap.get(ch.contributed_by) ?? ch.contributed_by : undefined, contribution_note: ch.contribution_note }));
+		setLdohPendingChannels(pendingChs);
 	}, [apiFetch]);
 
 	const loadTab = useCallback(
@@ -159,6 +229,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 				if (tabId === "usage") await loadUsage();
 				if (tabId === "settings") await loadSettings();
 				if (tabId === "users") await loadUsers();
+				if (tabId === "ldoh") await loadLdoh();
 				if (tabId === "playground") { /* no data to preload */ }
 			} catch (error) {
 				setNotice((error as Error).message);
@@ -169,6 +240,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		[
 			loadChannels,
 			loadDashboard,
+			loadLdoh,
 			loadModels,
 			loadMonitoring,
 			loadSettings,
@@ -191,15 +263,6 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		return () => window.removeEventListener("popstate", handlePopState);
 	}, []);
 
-	useEffect(() => {
-		if (!data.settings) return;
-		setSettingsForm({
-			log_retention_days: String(data.settings.log_retention_days ?? 30),
-			session_ttl_hours: String(data.settings.session_ttl_hours ?? 12),
-			admin_password: "",
-			site_mode: data.settings.site_mode ?? "personal",
-		});
-	}, [data.settings]);
 
 	const handleLogout = useCallback(async () => {
 		await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => null);
@@ -259,12 +322,14 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const closeChannelModal = useCallback(() => {
 		setEditingChannel(null);
 		setChannelForm({ ...initialChannelForm });
+		setChannelAliasState({});
 		setChannelModalOpen(false);
 	}, []);
 
 	const openChannelCreate = useCallback(() => {
 		setEditingChannel(null);
 		setChannelForm({ ...initialChannelForm });
+		setChannelAliasState({});
 		setChannelModalOpen(true);
 		setNotice("");
 	}, []);
@@ -277,6 +342,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const startChannelEdit = useCallback((channel: Channel) => {
 		setEditingChannel(channel);
 		let modelsList = "";
+		const modelIds: string[] = [];
 		if (channel.models_json) {
 			try {
 				const parsed = JSON.parse(channel.models_json);
@@ -287,20 +353,23 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 						: [];
 				modelsList = arr
 					.map((m: unknown) => {
-						if (typeof m === "string") return m;
+						if (typeof m === "string") { modelIds.push(m); return m; }
 						const obj = m as {
 							id?: string;
 							input_price?: number;
 							output_price?: number;
 							shared?: boolean;
+							enabled?: boolean;
 						};
 						const id = obj?.id ?? "";
 						if (!id) return "";
+						modelIds.push(id);
 						const ip = obj?.input_price;
 						const op = obj?.output_price;
 						const sh = obj?.shared;
-						if (ip != null || op != null || sh != null) {
-							return `${id}|${ip ?? ""}|${op ?? ""}|${sh ? "1" : "0"}`;
+						const en = obj?.enabled;
+						if (ip != null || op != null || sh != null || en != null) {
+							return `${id}|${ip ?? ""}|${op ?? ""}|${sh ? "1" : "0"}|${en === false ? "0" : "1"}`;
 						}
 						return id;
 					})
@@ -319,9 +388,21 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 			custom_headers: channel.custom_headers_json ?? "",
 			models: modelsList,
 		});
+		// Initialize alias state from per-channel alias map for this channel's models
+		const perChannelMap = channelModelAliases[channel.id] ?? {};
+		const initial: ModelAliasesMap = {};
+		for (const mid of modelIds) {
+			if (perChannelMap[mid]) {
+				initial[mid] = {
+					aliases: [...perChannelMap[mid].aliases],
+					alias_only: perChannelMap[mid].alias_only,
+				};
+			}
+		}
+		setChannelAliasState(initial);
 		setChannelModalOpen(true);
 		setNotice("");
-	}, []);
+	}, [channelModelAliases]);
 
 	const closeTokenModal = useCallback(() => setTokenModalOpen(false), []);
 
@@ -368,6 +449,14 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 						}
 						return entry;
 					});
+				// Build model_aliases payload from alias state
+				const modelIds = modelsArray.map((m) => m.id);
+				const aliasPayload: Record<string, { aliases: string[]; alias_only: boolean }> = {};
+				for (const mid of modelIds) {
+					if (channelAliasState[mid]) {
+						aliasPayload[mid] = channelAliasState[mid];
+					}
+				}
 				const body = {
 					name: channelName,
 					base_url: channelForm.base_url.trim(),
@@ -376,6 +465,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 					api_format: channelForm.api_format,
 					custom_headers: channelForm.custom_headers.trim() || undefined,
 					models: modelsArray.length > 0 ? modelsArray : undefined,
+					model_aliases: Object.keys(aliasPayload).length > 0 ? aliasPayload : undefined,
 				};
 				if (editingChannel) {
 					await apiFetch(`/api/channels/${editingChannel.id}`, {
@@ -399,6 +489,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		[
 			apiFetch,
 			channelForm,
+			channelAliasState,
 			closeChannelModal,
 			data.channels,
 			editingChannel,
@@ -437,15 +528,103 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		[apiFetch, loadTokens],
 	);
 
+	const handleLdohSync = useCallback(async () => {
+		await apiFetch("/api/ldoh/sync", { method: "POST" });
+		await loadLdoh();
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohApproveMaintainer = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/maintainers/${id}/approve`, { method: "POST" });
+		await loadLdoh();
+		setNotice("维护者已批准");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohRejectMaintainer = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/maintainers/${id}`, { method: "DELETE" });
+		await loadLdoh();
+		setNotice("维护者已移除");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohApproveChannel = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/channels/${id}/approve`, { method: "POST" });
+		await loadLdoh();
+		setNotice("渠道已批准");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohRejectChannel = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/channels/${id}/reject`, { method: "POST" });
+		await loadLdoh();
+		setNotice("渠道已拒绝");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohAddSite = useCallback(async (apiBaseUrl: string, maintainerUsername: string, name: string) => {
+		await apiFetch("/api/ldoh/sites", {
+			method: "POST",
+			body: JSON.stringify({ apiBaseUrl, maintainerUsername: maintainerUsername || undefined, name: name || undefined }),
+		});
+		await loadLdoh();
+		setNotice("站点已添加");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohBlockAll = useCallback(async () => {
+		const result = await apiFetch<{ blocked: number }>("/api/ldoh/block-all", { method: "POST" });
+		await loadLdoh();
+		setNotice(`已封禁 ${result.blocked} 个站点`);
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohEditSite = useCallback(async (id: string, data: { name?: string; description?: string; apiBaseUrls?: string }) => {
+		await apiFetch(`/api/ldoh/sites/${id}`, {
+			method: "PATCH",
+			body: JSON.stringify(data),
+		});
+		await loadLdoh();
+		setNotice("站点已更新");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohDeleteSite = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/sites/${id}`, { method: "DELETE" });
+		await loadLdoh();
+		setNotice("站点已删除");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohAddMaintainer = useCallback(async (siteId: string, username: string) => {
+		await apiFetch(`/api/ldoh/sites/${siteId}/maintainers`, {
+			method: "POST",
+			body: JSON.stringify({ username }),
+		});
+		await loadLdoh();
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohRemoveMaintainer = useCallback(async (maintainerId: string) => {
+		await apiFetch(`/api/ldoh/maintainers/${maintainerId}`, { method: "DELETE" });
+		await loadLdoh();
+	}, [apiFetch, loadLdoh]);
+
 	const handleSettingsSubmit = useCallback(
 		async (event: Event) => {
 			event.preventDefault();
 			const retention = Number(settingsForm.log_retention_days);
 			const sessionTtlHours = Number(settingsForm.session_ttl_hours);
-			const payload: Record<string, number | string> = {
+			const payload: Record<string, number | string | boolean> = {
 				log_retention_days: retention,
 				session_ttl_hours: sessionTtlHours,
 				site_mode: settingsForm.site_mode,
+				registration_mode: settingsForm.registration_mode,
+				checkin_reward: Number(settingsForm.checkin_reward),
+				require_invite_code: settingsForm.require_invite_code === "true",
+				channel_fee_enabled: settingsForm.channel_fee_enabled === "true",
+				channel_review_enabled: settingsForm.channel_review_enabled === "true",
+				user_channel_selection_enabled: settingsForm.user_channel_selection_enabled === "true",
+				default_balance: Number(settingsForm.default_balance),
+				withdrawal_enabled: settingsForm.withdrawal_enabled === "true",
+				withdrawal_fee_rate: Number(settingsForm.withdrawal_fee_rate),
+				withdrawal_mode: settingsForm.withdrawal_mode,
+				ldc_payment_enabled: settingsForm.ldc_payment_enabled === "true",
+				ldc_epay_pid: settingsForm.ldc_epay_pid,
+				ldc_epay_key: settingsForm.ldc_epay_key,
+				ldc_epay_gateway: settingsForm.ldc_epay_gateway,
+				ldc_exchange_rate: Number(settingsForm.ldc_exchange_rate),
+				ldoh_cookie: settingsForm.ldoh_cookie,
 			};
 			const password = settingsForm.admin_password.trim();
 			if (password) {
@@ -484,6 +663,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 
 	const handleChannelDelete = useCallback(
 		async (id: string) => {
+			if (!window.confirm("确定要删除该渠道吗？此操作不可撤销。")) return;
 			try {
 				await apiFetch(`/api/channels/${id}`, { method: "DELETE" });
 				await loadChannels();
@@ -517,6 +697,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 
 	const handleTokenDelete = useCallback(
 		async (id: string) => {
+			if (!window.confirm("确定要删除该令牌吗？此操作不可撤销。")) return;
 			try {
 				await apiFetch(`/api/tokens/${id}`, { method: "DELETE" });
 				await loadTokens();
@@ -568,6 +749,54 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		[apiFetch, loadTokens],
 	);
 
+	const handleGenerateCodes = useCallback(
+		async (count: number, maxUses: number, prefix: string) => {
+			try {
+				await apiFetch("/api/invite-codes", {
+					method: "POST",
+					body: JSON.stringify({ count, max_uses: maxUses, prefix }),
+				});
+				const result = await apiFetch<{ codes: InviteCode[] }>("/api/invite-codes");
+				setInviteCodes(result.codes);
+				setNotice("邀请码已生成");
+			} catch (error) {
+				setNotice((error as Error).message);
+			}
+		},
+		[apiFetch],
+	);
+
+	const handleDeleteCode = useCallback(
+		async (id: string) => {
+			try {
+				await apiFetch(`/api/invite-codes/${id}`, { method: "DELETE" });
+				const result = await apiFetch<{ codes: InviteCode[] }>("/api/invite-codes");
+				setInviteCodes(result.codes);
+				setNotice("邀请码已删除");
+			} catch (error) {
+				setNotice((error as Error).message);
+			}
+		},
+		[apiFetch],
+	);
+
+	const handleExportCodes = useCallback(async () => {
+		try {
+			const res = await fetch("/api/invite-codes/export", {
+				headers: { "x-admin-token": token },
+			});
+			const text = await res.text();
+			try {
+				await navigator.clipboard.writeText(text);
+				setNotice("邀请码已复制到剪贴板");
+			} catch {
+				setNotice(`邀请码:\n${text}`);
+			}
+		} catch (error) {
+			setNotice((error as Error).message);
+		}
+	}, [token]);
+
 	const handleUsageRefresh = useCallback(async () => {
 		try {
 			await loadUsage();
@@ -580,12 +809,13 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const handleAliasSave = useCallback(
 		async (
 			modelId: string,
-			aliases: Array<{ alias: string; is_primary: boolean }>,
+			aliases: string[],
+			aliasOnly?: boolean,
 		) => {
 			try {
 				await apiFetch(`/api/model-aliases/${encodeURIComponent(modelId)}`, {
 					method: "PUT",
-					body: JSON.stringify({ aliases }),
+					body: JSON.stringify({ aliases, alias_only: aliasOnly ?? false }),
 				});
 				await loadModels();
 				setNotice("别名已保存");
@@ -661,6 +891,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 
 	const handleUserDelete = useCallback(
 		async (id: string) => {
+			if (!window.confirm("确定要删除该用户吗？此操作不可撤销。")) return;
 			try {
 				await apiFetch(`/api/users/${id}`, { method: "DELETE" });
 				await loadUsers();
@@ -746,6 +977,8 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 					editingChannel={editingChannel}
 					isChannelModalOpen={isChannelModalOpen}
 					siteMode={data.settings?.site_mode ?? "personal"}
+					channelAliasState={channelAliasState}
+					onChannelAliasStateChange={setChannelAliasState}
 					onCreate={openChannelCreate}
 					onCloseModal={closeChannelModal}
 					onEdit={startChannelEdit}
@@ -795,6 +1028,10 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 					adminPasswordSet={data.settings?.admin_password_set ?? false}
 					onSubmit={handleSettingsSubmit}
 					onFormChange={handleSettingsFormChange}
+					inviteCodes={inviteCodes}
+					onGenerateCodes={handleGenerateCodes}
+					onDeleteCode={handleDeleteCode}
+					onExportCodes={handleExportCodes}
 				/>
 			);
 		}
@@ -810,6 +1047,27 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		}
 		if (activeTab === "playground") {
 			return <PlaygroundView token={token} />;
+		}
+		if (activeTab === "ldoh") {
+			return (
+				<LdohView
+					sites={ldohSites}
+					violations={ldohViolations}
+					pendingMaintainers={ldohPendingMaintainers}
+					pendingChannels={ldohPendingChannels}
+					onSync={handleLdohSync}
+					onBlockAll={handleLdohBlockAll}
+					onAddSite={handleLdohAddSite}
+					onEditSite={handleLdohEditSite}
+					onDeleteSite={handleLdohDeleteSite}
+					onAddMaintainer={handleLdohAddMaintainer}
+					onRemoveMaintainer={handleLdohRemoveMaintainer}
+					onApproveMaintainer={handleLdohApproveMaintainer}
+					onRejectMaintainer={handleLdohRejectMaintainer}
+					onApproveChannel={handleLdohApproveChannel}
+					onRejectChannel={handleLdohRejectChannel}
+				/>
+			);
 		}
 		return (
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -831,7 +1089,9 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 			onLogout={handleLogout}
 			onNavigate={onNavigate}
 		>
-			{renderContent()}
+			<div key={activeTab}>
+				{renderContent()}
+			</div>
 		</AppLayout>
 	);
 };

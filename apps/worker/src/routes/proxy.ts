@@ -7,8 +7,8 @@ import {
 	extractModels,
 } from "../services/channels";
 import {
-	collectUniqueModelIds,
-	collectUniqueSharedModelIds,
+	extractModelIds,
+	extractSharedModelPricings,
 	extractSharedModels,
 } from "../services/channel-models";
 import {
@@ -18,15 +18,15 @@ import {
 } from "../services/format-converter";
 import { recordUsage } from "../services/usage";
 import { calculateCost, getModelPrice } from "../services/pricing";
-import { getSiteMode } from "../services/settings";
+import { getChannelFeeEnabled, getSiteMode, getWithdrawalMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { extractReasoningEffort } from "../utils/reasoning";
 import { parseApiKeys, shuffleArray } from "../utils/keys";
 import { isRetryableStatus, sleep } from "../utils/retry";
 import { resolveChannelRoute } from "../services/channel-route";
-import { resolveModelNames, loadAliasMap } from "../services/model-aliases";
-import { normalizeBaseUrl } from "../utils/url";
+import { loadChannelAliasesByAlias, loadChannelAliasOnlyMap, loadAllChannelAliasesGrouped } from "../services/model-aliases";
+import { cfSafeUrl, normalizeBaseUrl } from "../utils/url";
 import {
 	type NormalizedUsage,
 	parseUsageFromHeaders,
@@ -65,60 +65,33 @@ export function channelSupportsSharedModel(
 	return models.some((entry) => entry.id === model);
 }
 
-/**
- * Returns true if the channel supports ANY of the given model names.
- */
-export function channelSupportsAnyModel(
-	channel: ChannelRecord,
-	names: string[],
-): boolean {
-	const models = extractModels(channel);
-	return names.some((name) => models.some((entry) => entry.id === name));
-}
-
-/**
- * Returns true if the channel supports ANY of the given model names (shared only).
- */
-export function channelSupportsAnySharedModel(
-	channel: ChannelRecord,
-	names: string[],
-): boolean {
-	const models = extractSharedModels(
-		channel as unknown as { id: string; name: string; models_json: string },
-	);
-	return names.some((name) => models.some((entry) => entry.id === name));
-}
-
-/**
- * Finds which model name from the resolved set the channel actually supports.
- * Returns the first match, or the first name as fallback.
- */
-export function findChannelModelName(
-	channel: ChannelRecord,
-	names: string[],
-): string {
-	const models = extractModels(channel);
-	for (const name of names) {
-		if (models.some((entry) => entry.id === name)) {
-			return name;
-		}
-	}
-	return names[0];
-}
-
 export function filterAllowedChannels(
 	channels: ChannelRecord[],
 	tokenRecord: TokenRecord,
+	model?: string | null,
 ): ChannelRecord[] {
-	const allowed = safeJsonParse<string[] | null>(
+	const raw = safeJsonParse<string[] | Record<string, string[]> | null>(
 		tokenRecord.allowed_channels,
 		null,
 	);
-	if (!allowed || allowed.length === 0) {
+	if (!raw) {
 		return channels;
 	}
-	const allowedSet = new Set(allowed);
-	return channels.filter((channel) => allowedSet.has(channel.id));
+	// Legacy flat array format: ["ch1", "ch2"]
+	if (Array.isArray(raw)) {
+		if (raw.length === 0) return channels;
+		const allowedSet = new Set(raw);
+		return channels.filter((channel) => allowedSet.has(channel.id));
+	}
+	// Per-model map format: { "model-a": ["ch1", "ch2"] }
+	if (typeof raw === "object") {
+		if (!model) return channels;
+		const perModel = raw[model];
+		if (!perModel || perModel.length === 0) return channels;
+		const allowedSet = new Set(perModel);
+		return channels.filter((channel) => allowedSet.has(channel.id));
+	}
+	return channels;
 }
 
 // Chat endpoint paths — only these are compatible with anthropic-format channels
@@ -151,7 +124,7 @@ export function buildChannelRequest(
 
 	if (apiFormat === "anthropic") {
 		const baseUrl = normalizeBaseUrl(channel.base_url);
-		const target = `${baseUrl}/v1/messages`;
+		const target = cfSafeUrl(`${baseUrl}/v1/messages`);
 		headers.set("x-api-key", String(effectiveKey));
 		headers.set("anthropic-version", "2023-06-01");
 		headers.set("content-type", "application/json");
@@ -168,7 +141,7 @@ export function buildChannelRequest(
 
 	if (apiFormat === "custom") {
 		// For custom format, base_url IS the full target URL
-		const target = `${channel.base_url}${querySuffix}`;
+		const target = cfSafeUrl(`${channel.base_url}${querySuffix}`);
 		headers.set("Authorization", `Bearer ${effectiveKey}`);
 		headers.set("x-api-key", String(effectiveKey));
 
@@ -189,7 +162,7 @@ export function buildChannelRequest(
 	// base_url already includes version path (e.g. /v1), so strip /v1 from incoming path
 	const baseUrl = channel.base_url.replace(/\/+$/, "");
 	const subPath = targetPath.replace(/^\/v1\b/, "");
-	const target = `${baseUrl}${subPath}${querySuffix}`;
+	const target = cfSafeUrl(`${baseUrl}${subPath}${querySuffix}`);
 	headers.set("Authorization", `Bearer ${effectiveKey}`);
 	headers.set("x-api-key", String(effectiveKey));
 	return { target, headers, body: requestText || undefined };
@@ -233,7 +206,7 @@ export async function convertResponse(
 
 /**
  * OpenAI-compatible /models endpoint.
- * Returns all unique models from active channels.
+ * Returns all callable model names using the effective mapping algorithm.
  */
 proxy.get("/models", tokenAuth, async (c) => {
 	const tokenRecord = c.get("tokenRecord") as TokenRecord;
@@ -243,33 +216,68 @@ proxy.get("/models", tokenAuth, async (c) => {
 		.bind("active")
 		.all();
 	const activeChannels = (channelResult.results ?? []) as ChannelRecord[];
-	const allowed = filterAllowedChannels(activeChannels, tokenRecord);
+
+	// Parse allowed_channels once for per-model filtering
+	const rawAllowed = safeJsonParse<string[] | Record<string, string[]> | null>(
+		tokenRecord.allowed_channels,
+		null,
+	);
+	const isPerModelMap = rawAllowed !== null && !Array.isArray(rawAllowed) && typeof rawAllowed === "object";
+
+	// For legacy flat-array format, pre-filter channels once
+	const baseAllowed = isPerModelMap
+		? activeChannels
+		: filterAllowedChannels(activeChannels, tokenRecord);
 
 	const siteMode = await getSiteMode(c.env.DB);
 	const useSharedFilter = siteMode === "shared" && !!tokenRecord.user_id;
-	const modelIds = useSharedFilter
-		? collectUniqueSharedModelIds(allowed)
-		: collectUniqueModelIds(allowed);
 
+	// Build per-channel model ID sets
+	const channelModelIds = new Map<string, string[]>();
+	for (const ch of baseAllowed) {
+		const chModelIds = useSharedFilter
+			? extractSharedModelPricings(ch).filter((m) => m.enabled !== false).map((m) => m.id)
+			: extractModelIds(ch);
+		channelModelIds.set(ch.id, chModelIds);
+	}
+
+	// Load alias data
+	const aliasGroups = await loadAllChannelAliasesGrouped(c.env.DB);
+
+	// Compute effective mapping
 	const now = Math.floor(Date.now() / 1000);
-	const modelData = modelIds.map((id) => ({
-		id,
-		object: "model",
-		created: now,
-		owned_by: "system",
-	}));
+	const modelData: Array<{ id: string; object: string; created: number; owned_by: string }> = [];
+	const seen = new Set<string>();
 
-	// Add aliases that point to models in the list
-	const modelIdSet = new Set(modelIds);
-	const aliasMap = await loadAliasMap(c.env.DB);
-	for (const [alias, targetModelId] of aliasMap) {
-		if (modelIdSet.has(targetModelId) && !modelIdSet.has(alias)) {
-			modelData.push({
-				id: alias,
-				object: "model",
-				created: now,
-				owned_by: "system",
-			});
+	for (const ch of baseAllowed) {
+		const modelIds = channelModelIds.get(ch.id) ?? [];
+		const chAliases = aliasGroups.get(ch.id);
+
+		for (const modelId of modelIds) {
+			// Per-model channel restriction: skip if this channel is not allowed for this model
+			if (isPerModelMap) {
+				const perModel = (rawAllowed as Record<string, string[]>)[modelId];
+				if (perModel && perModel.length > 0 && !perModel.includes(ch.id)) continue;
+			}
+
+			const aliasInfo = chAliases?.get(modelId);
+			const isAliasOnly = aliasInfo?.alias_only ?? false;
+
+			// Original name (unless alias_only)
+			if (!isAliasOnly && !seen.has(modelId)) {
+				seen.add(modelId);
+				modelData.push({ id: modelId, object: "model", created: now, owned_by: "system" });
+			}
+
+			// Alias names
+			if (aliasInfo) {
+				for (const alias of aliasInfo.aliases) {
+					if (!seen.has(alias)) {
+						seen.add(alias);
+						modelData.push({ id: alias, object: "model", created: now, owned_by: "system" });
+					}
+				}
+			}
 		}
 	}
 
@@ -295,8 +303,12 @@ proxy.all("/*", tokenAuth, async (c) => {
 			: null;
 	const isStream = parsedBody?.stream === true;
 
-	// Resolve model aliases — returns all model IDs this name can route to
-	const resolvedNames = model ? await resolveModelNames(c.env.DB, model) : [];
+	// Resolve per-channel aliases for this model name
+	const channelAliasHits = model ? await loadChannelAliasesByAlias(c.env.DB, model) : [];
+	const channelAliasHitMap = new Map(channelAliasHits.map((h) => [h.channel_id, h]));
+
+	// Load per-channel alias-only map
+	const perChannelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
 
 	const reasoningEffort = extractReasoningEffort(parsedBody);
 	let mutatedStreamOptions = false;
@@ -354,14 +366,21 @@ proxy.all("/*", tokenAuth, async (c) => {
 		}
 		candidates = [targetChannel];
 	} else {
-		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
-		if (resolvedNames.length > 0) {
+		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord, model);
+		if (model) {
 			const supportsFn = useSharedFilter
-				? channelSupportsAnySharedModel
-				: channelSupportsAnyModel;
-			candidates = allowedChannels.filter((channel) =>
-				supportsFn(channel, resolvedNames),
-			);
+				? channelSupportsSharedModel
+				: channelSupportsModel;
+			candidates = allowedChannels.filter((channel) => {
+				// Channel matched via per-channel alias → include
+				if (channelAliasHitMap.has(channel.id)) return true;
+				// Channel natively supports this model → include UNLESS alias_only
+				if (supportsFn(channel, model)) {
+					const aliasOnlyModels = perChannelAliasOnlyMap.get(channel.id);
+					return !(aliasOnlyModels?.has(model));
+				}
+				return false;
+			});
 		} else {
 			// No model specified — all channels qualify
 			const supportsFn = useSharedFilter
@@ -397,6 +416,14 @@ proxy.all("/*", tokenAuth, async (c) => {
 		}
 	}
 
+	// stream_only channels should not serve non-streaming requests
+	if (!isStream) {
+		candidates = candidates.filter((ch) => !ch.stream_only);
+		if (candidates.length === 0) {
+			return jsonError(c, 400, "stream_required", "所有可用渠道要求使用流式调用");
+		}
+	}
+
 	const ordered = createWeightedOrder(candidates);
 	const fallbackSubPath =
 		targetPath.toLowerCase() === "/v1/responses" ? "/responses" : null;
@@ -425,9 +452,11 @@ proxy.all("/*", tokenAuth, async (c) => {
 			let channelRequestText = requestText;
 			let channelParsedBody = parsedBody;
 			let channelModelName = effectiveModel;
-			if (!targetChannel && resolvedNames.length > 1 && parsedBody) {
-				channelModelName = findChannelModelName(channel, resolvedNames);
-				if (channelModelName !== model) {
+			if (!targetChannel && parsedBody) {
+				// Check if this channel was matched via per-channel alias
+				const aliasHit = channelAliasHitMap.get(channel.id);
+				if (aliasHit) {
+					channelModelName = aliasHit.model_id;
 					channelParsedBody = { ...parsedBody, model: channelModelName };
 					channelRequestText = JSON.stringify(channelParsedBody);
 				}
@@ -466,7 +495,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 						fallbackSubPath
 					) {
 						const strippedBase = normalizeBaseUrl(channel.base_url);
-						const fallbackTarget = `${strippedBase}${fallbackSubPath}${querySuffix}`;
+						const fallbackTarget = cfSafeUrl(`${strippedBase}${fallbackSubPath}${querySuffix}`);
 						const fallbackBody = mutatedStreamOptions
 							? originalRequestText
 							: channelRequestText;
@@ -531,6 +560,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 			stream: isStream,
 			reasoningEffort,
 			status: "error",
+			errorMessage: "upstream_unavailable",
 		});
 		return jsonError(c, 502, "upstream_unavailable", "upstream_unavailable");
 	}
@@ -538,6 +568,17 @@ proxy.all("/*", tokenAuth, async (c) => {
 	const channelForUsage = selectedChannel ?? lastChannel;
 	if (channelForUsage && lastResponse) {
 		const price = getModelPrice(channelForUsage.models_json, selectedModelName ?? "");
+		let errorCode: number | null = null;
+		let errorMessage: string | null = null;
+		if (!lastResponse.ok) {
+			errorCode = lastResponse.status;
+			try {
+				const errText = await lastResponse.clone().text();
+				errorMessage = errText.slice(0, 512);
+			} catch {
+				errorMessage = null;
+			}
+		}
 		const record = async (
 			usage: NormalizedUsage | null,
 			firstTokenLatencyMs?: number | null,
@@ -548,7 +589,7 @@ proxy.all("/*", tokenAuth, async (c) => {
 				completionTokens: 0,
 			};
 			const cost = price
-				? calculateCost(price, normalized.promptTokens, normalized.completionTokens)
+				? calculateCost(price, normalized.promptTokens, normalized.completionTokens, normalized.totalTokens)
 				: 0;
 			const resolvedFirstTokenLatencyMs =
 				firstTokenLatencyMs ?? (isStream ? null : latencyMs);
@@ -566,15 +607,55 @@ proxy.all("/*", tokenAuth, async (c) => {
 				stream: isStream,
 				reasoningEffort,
 				status: lastResponse.ok ? "ok" : "error",
+				errorCode,
+				errorMessage,
 			});
 			// Deduct user balance
 			if (cost > 0 && tokenRecord.user_id) {
 				const now = new Date().toISOString();
-				await c.env.DB.prepare(
-					"UPDATE users SET balance = balance - ?, updated_at = ? WHERE id = ?",
-				)
-					.bind(cost, now, tokenRecord.user_id)
-					.run();
+				const withdrawalMode = await getWithdrawalMode(c.env.DB);
+				if (withdrawalMode === "strict") {
+					await c.env.DB.prepare(
+						"UPDATE users SET balance = balance - ?, withdrawable_balance = MAX(0, withdrawable_balance - ?), updated_at = ? WHERE id = ?",
+					)
+						.bind(cost, cost, now, tokenRecord.user_id)
+						.run();
+				} else {
+					await c.env.DB.prepare(
+						"UPDATE users SET balance = balance - ?, updated_at = ? WHERE id = ?",
+					)
+						.bind(cost, now, tokenRecord.user_id)
+						.run();
+				}
+			}
+			// Credit contributor balance
+			// Only credit withdrawable_balance for the portion that came from the consumer's withdrawable balance,
+			// so gifted/free balance (default_balance, checkin rewards) cannot be laundered into withdrawable funds.
+			if (cost > 0 && channelForUsage.contributed_by && channelForUsage.charge_enabled === 1) {
+				const feeEnabled = await getChannelFeeEnabled(c.env.DB);
+				if (feeEnabled) {
+					const now = new Date().toISOString();
+					// Read the consumer's current balance AFTER deduction to determine how much came from withdrawable
+					let withdrawableCredit = 0;
+					if (tokenRecord.user_id) {
+						const consumer = await c.env.DB.prepare(
+							"SELECT balance, withdrawable_balance FROM users WHERE id = ?",
+						).bind(tokenRecord.user_id).first<{ balance: number; withdrawable_balance: number }>();
+						if (consumer) {
+							// After deduction: balance is already reduced by cost
+							// Before deduction: old_balance = consumer.balance + cost
+							// Gifted portion = old_balance - withdrawable_balance = (consumer.balance + cost) - consumer.withdrawable_balance
+							const giftedPortion = Math.max(0, (consumer.balance + cost) - consumer.withdrawable_balance);
+							// Amount consumed from withdrawable = cost - giftedPortion (clamped to [0, cost])
+							withdrawableCredit = Math.max(0, cost - giftedPortion);
+						}
+					}
+					await c.env.DB.prepare(
+						"UPDATE users SET balance = balance + ?, withdrawable_balance = withdrawable_balance + ?, updated_at = ? WHERE id = ?",
+					)
+						.bind(cost, withdrawableCredit, now, channelForUsage.contributed_by)
+						.run();
+				}
 			}
 		};
 		const logUsage = (
@@ -628,7 +709,13 @@ proxy.all("/*", tokenAuth, async (c) => {
 					logUsage("stream", usageValue, source);
 					return record(usageValue, streamUsage.firstTokenLatencyMs);
 				})
-				.catch(() => undefined);
+				.catch(async () => {
+					// SSE parsing failed (stream interrupted, etc.) — still record with whatever we have
+					try {
+						logUsage("stream-fallback", immediateUsage, immediateSource);
+						await record(immediateUsage, null);
+					} catch { /* truly lost */ }
+				});
 			if (executionCtx?.waitUntil) {
 				executionCtx.waitUntil(task);
 			} else {

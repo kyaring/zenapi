@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "hono/jsx/dom";
 import { apiBase } from "../core/constants";
-import type { MonitoringChannelData, MonitoringData, MonitoringDailyTrend } from "../core/types";
+import type { MonitoringChannelData, MonitoringData, MonitoringDailyTrend, MonitoringErrorDetail, MonitoringSlotModel } from "../core/types";
 
 type MonitoringViewProps = {
 	monitoring: MonitoringData | null;
@@ -58,8 +58,17 @@ const generateSlots = (range: string): string[] => {
 			// YYYY-MM-DDTHH:MM — matches SQL substr(created_at, 1, 16) on ISO strings
 			result.push(d.toISOString().slice(0, 16));
 		}
+	} else if (range === "1d" || range === "7d") {
+		const hours = range === "1d" ? 24 : 168;
+		// Round down to current hour
+		now.setMinutes(0, 0, 0);
+		for (let i = hours - 1; i >= 0; i--) {
+			const d = new Date(now.getTime() - i * 3_600_000);
+			// YYYY-MM-DDTHH — matches SQL substr(created_at, 1, 13) on ISO strings
+			result.push(d.toISOString().slice(0, 13));
+		}
 	} else {
-		const days = range === "30d" ? 30 : range === "7d" ? 7 : 1;
+		const days = 30;
 		for (let i = days - 1; i >= 0; i--) {
 			const d = new Date(now.getTime() - i * 86_400_000);
 			result.push(d.toISOString().slice(0, 10));
@@ -77,6 +86,14 @@ const formatSlotLabel = (slot: string, range: string): string => {
 		const mm = String(date.getMinutes()).padStart(2, "0");
 		return `${hh}:${mm}`;
 	}
+	if (range === "1d" || range === "7d") {
+		// slot is "YYYY-MM-DDTHH" in UTC — convert to local time
+		const date = new Date(`${slot}:00:00.000Z`);
+		const MM = String(date.getMonth() + 1).padStart(2, "0");
+		const DD = String(date.getDate()).padStart(2, "0");
+		const hh = String(date.getHours()).padStart(2, "0");
+		return `${MM}-${DD} ${hh}:00`;
+	}
 	return slot;
 };
 
@@ -85,12 +102,55 @@ type ChannelBarProps = {
 	slots: string[];
 	range: string;
 	trendMap: Map<string, MonitoringDailyTrend>;
+	token: string;
 };
 
-const ChannelBar = ({ channel, slots, range, trendMap }: ChannelBarProps) => {
+const ChannelBar = ({ channel, slots, range, trendMap, token }: ChannelBarProps) => {
 	const [hoveredSlot, setHoveredSlot] = useState<string | null>(null);
+	const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+	const [slotModels, setSlotModels] = useState<MonitoringSlotModel[]>([]);
+	const [errorDetails, setErrorDetails] = useState<MonitoringErrorDetail[]>([]);
+	const [loadingDetails, setLoadingDetails] = useState(false);
 
 	const hoveredTrend = hoveredSlot ? trendMap.get(`${channel.channel_id}|${hoveredSlot}`) : null;
+
+	const handleSlotClick = async (slot: string) => {
+		const trend = trendMap.get(`${channel.channel_id}|${slot}`);
+		if (!trend) return;
+
+		if (selectedSlot === slot) {
+			setSelectedSlot(null);
+			setSlotModels([]);
+			setErrorDetails([]);
+			return;
+		}
+
+		setSelectedSlot(slot);
+		setLoadingDetails(true);
+		try {
+			const headers: Record<string, string> = { "Content-Type": "application/json" };
+			if (token) headers.Authorization = `Bearer ${token}`;
+			const res = await fetch(
+				`${apiBase}/api/monitoring/slot-details?slot=${encodeURIComponent(slot)}&channel_id=${encodeURIComponent(String(channel.channel_id))}&range=${range}`,
+				{ headers },
+			);
+			if (res.ok) {
+				const data = (await res.json()) as { models: MonitoringSlotModel[]; errors: MonitoringErrorDetail[] };
+				setSlotModels(data.models);
+				setErrorDetails(data.errors);
+			}
+		} catch {
+			/* ignore */
+		} finally {
+			setLoadingDetails(false);
+		}
+	};
+
+	const closePanel = () => {
+		setSelectedSlot(null);
+		setSlotModels([]);
+		setErrorDetails([]);
+	};
 
 	return (
 		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
@@ -124,15 +184,17 @@ const ChannelBar = ({ channel, slots, range, trendMap }: ChannelBarProps) => {
 				{slots.map((slot) => {
 					const trend = trendMap.get(`${channel.channel_id}|${slot}`);
 					const rate = trend ? trend.success_rate : null;
+					const isSelected = selectedSlot === slot;
 					return (
 						<div
 							key={slot}
 							class="relative flex-1 cursor-pointer"
 							onMouseEnter={() => setHoveredSlot(slot)}
 							onMouseLeave={() => setHoveredSlot(null)}
+							onClick={() => handleSlotClick(slot)}
 						>
 							<div
-								class="h-8 rounded-sm transition-opacity hover:opacity-80"
+								class={`h-8 rounded-sm transition-opacity hover:opacity-80 ${isSelected ? "ring-2 ring-stone-900 ring-offset-1" : ""}`}
 								style={{ backgroundColor: barColor(rate) }}
 							/>
 						</div>
@@ -163,6 +225,87 @@ const ChannelBar = ({ channel, slots, range, trendMap }: ChannelBarProps) => {
 						</span>
 					) : (
 						<span class="text-stone-400"> &mdash; 无请求</span>
+					)}
+				</div>
+			)}
+
+			{/* Slot details panel */}
+			{selectedSlot && (
+				<div class="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
+					<div class="mb-2 flex items-center justify-between">
+						<span class="text-sm font-medium text-stone-800">
+							{formatSlotLabel(selectedSlot, range)} 请求详情
+						</span>
+						<button
+							type="button"
+							class="text-xs text-stone-400 hover:text-stone-600"
+							onClick={closePanel}
+						>
+							关闭
+						</button>
+					</div>
+					{loadingDetails ? (
+						<div class="text-xs text-stone-400">加载中...</div>
+					) : (
+						<>
+							{/* Model summary table */}
+							{slotModels.length > 0 && (
+								<table class="w-full text-xs">
+									<thead>
+										<tr class="border-b border-stone-200 text-left text-stone-500">
+											<th class="pb-1 font-medium">模型</th>
+											<th class="pb-1 text-right font-medium">请求</th>
+											<th class="pb-1 text-right font-medium">成功</th>
+											<th class="pb-1 text-right font-medium">错误</th>
+											<th class="pb-1 text-right font-medium">延迟</th>
+										</tr>
+									</thead>
+									<tbody>
+										{slotModels.map((m) => (
+											<tr key={m.model} class="border-b border-stone-100">
+												<td class="py-1 font-mono text-stone-700">{m.model}</td>
+												<td class="py-1 text-right text-stone-600">{m.requests}</td>
+												<td class="py-1 text-right text-green-600">{m.success}</td>
+												<td class={`py-1 text-right ${m.errors > 0 ? "text-red-600 font-medium" : "text-stone-400"}`}>{m.errors}</td>
+												<td class="py-1 text-right text-stone-500">{m.avg_latency_ms}ms</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							)}
+
+							{/* Error details */}
+							{errorDetails.length > 0 && (
+								<div class="mt-3 rounded-lg border border-red-200 bg-red-50 p-2">
+									<div class="mb-1.5 text-xs font-medium text-red-800">
+										错误详情 ({errorDetails.length})
+									</div>
+									<div class="max-h-60 space-y-2 overflow-y-auto">
+										{errorDetails.map((err) => (
+											<div key={err.id} class="rounded bg-white p-2 text-xs shadow-sm">
+												<div class="flex items-center gap-2">
+													{err.error_code && (
+														<span class="font-mono font-medium text-red-600">{err.error_code}</span>
+													)}
+													{err.model && (
+														<span class="text-stone-600">{err.model}</span>
+													)}
+													{err.latency_ms != null && (
+														<span class="text-stone-400">{err.latency_ms}ms</span>
+													)}
+													<span class="ml-auto text-stone-400">{err.created_at}</span>
+												</div>
+												{err.error_message && (
+													<pre class="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-all rounded bg-red-50 p-1 text-xs text-red-700">
+														{err.error_message}
+													</pre>
+												)}
+											</div>
+										))}
+									</div>
+								</div>
+							)}
+						</>
 					)}
 				</div>
 			)}
@@ -321,6 +464,7 @@ export const MonitoringView = ({
 					slots={slots}
 					range={range}
 					trendMap={trendMap}
+					token={token}
 				/>
 			))}
 

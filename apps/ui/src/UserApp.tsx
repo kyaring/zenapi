@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "hono/jsx/dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "hono/jsx/dom";
 import { createApiFetch } from "./core/api";
 import { userTabs } from "./core/constants";
 import type {
+	MonitoringData,
 	PublicModelItem,
 	SiteMode,
 	Token,
@@ -15,12 +16,37 @@ import { UserModelsView } from "./features/UserModelsView";
 import { UserTokensView } from "./features/UserTokensView";
 import { UserUsageView } from "./features/UserUsageView";
 import { UserChannelsView } from "./features/UserChannelsView";
+import { MonitoringView } from "./features/MonitoringView";
+
+type ChannelItem = {
+	id: string;
+	name: string;
+	base_url: string;
+	api_key?: string;
+	models_json?: string;
+	api_format: string;
+	status: string;
+	charge_enabled?: number;
+	stream_only?: number;
+	contribution_note?: string;
+	created_at: string;
+};
+
+export type ModelAliasConfig = {
+	aliases: string[];
+	alias_only: boolean;
+};
+
+export type ModelAliasesMap = Record<string, ModelAliasConfig>;
 
 type UserAppProps = {
 	token: string;
 	user: User;
 	updateToken: (next: string | null) => void;
 	onNavigate: (path: string) => void;
+	linuxdoEnabled: boolean;
+	onUserRefresh: () => void;
+	siteMode: SiteMode;
 };
 
 const normalizePath = (path: string) => {
@@ -30,6 +56,7 @@ const normalizePath = (path: string) => {
 
 const userTabToPath: Record<UserTabId, string> = {
 	dashboard: "/user",
+	monitoring: "/user/monitoring",
 	models: "/user/models",
 	tokens: "/user/tokens",
 	usage: "/user/usage",
@@ -38,13 +65,14 @@ const userTabToPath: Record<UserTabId, string> = {
 
 const userPathToTab: Record<string, UserTabId> = {
 	"/user": "dashboard",
+	"/user/monitoring": "monitoring",
 	"/user/models": "models",
 	"/user/tokens": "tokens",
 	"/user/usage": "usage",
 	"/user/channels": "channels",
 };
 
-export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) => {
+export const UserApp = ({ token, user, updateToken, onNavigate, linuxdoEnabled, onUserRefresh, siteMode }: UserAppProps) => {
 	const [activeTab, setActiveTab] = useState<UserTabId>(() => {
 		const normalized = normalizePath(window.location.pathname);
 		return userPathToTab[normalized] ?? "dashboard";
@@ -54,25 +82,45 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 	const [dashboardData, setDashboardData] =
 		useState<UserDashboardData | null>(null);
 	const [models, setModels] = useState<PublicModelItem[]>([]);
-	const [siteMode, setSiteMode] = useState<SiteMode>("personal");
+	const [channels, setChannels] = useState<ChannelItem[]>([]);
+	const [channelAliases, setChannelAliases] = useState<Record<string, ModelAliasesMap>>({});
 	const [tokens, setTokens] = useState<Token[]>([]);
 	const [usage, setUsage] = useState<UsageLog[]>([]);
+	const [monitoring, setMonitoring] = useState<MonitoringData | null>(null);
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+	// Handle Linux DO bind callback parameters
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const bindOk = params.get("linuxdo_bindok");
+		const bindError = params.get("linuxdo_binderror");
+		const rechargeOk = params.get("recharge");
+		if (bindOk) {
+			history.replaceState(null, "", "/user");
+			setNotice("Linux DO 账号绑定成功");
+			onUserRefresh();
+		} else if (bindError) {
+			history.replaceState(null, "", "/user");
+			const errorMessages: Record<string, string> = {
+				missing_token: "绑定失败：缺少令牌",
+				invalid_token: "绑定失败：令牌无效或已过期",
+				user_not_found: "绑定失败：用户不存在",
+				already_bound: "绑定失败：已绑定 Linux DO 账号",
+				linuxdo_already_taken: "绑定失败：该 Linux DO 账号已被其他用户绑定",
+				invalid_bind_cookie: "绑定失败：绑定状态无效",
+			};
+			setNotice(errorMessages[bindError] ?? `绑定失败：${bindError}`);
+		} else if (rechargeOk === "ok") {
+			history.replaceState(null, "", "/user");
+			setNotice("充值成功，余额已更新");
+			onUserRefresh();
+		}
+	}, [onUserRefresh]);
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
 		[token, updateToken],
 	);
-
-	// Load site mode eagerly on mount so conditional tabs (e.g. channels) appear immediately
-	useEffect(() => {
-		apiFetch<{ models: PublicModelItem[]; site_mode: SiteMode }>("/api/u/models")
-			.then((result) => {
-				setSiteMode(result.site_mode);
-				setModels(result.models);
-			})
-			.catch(() => {});
-	}, [apiFetch]);
 
 	const loadDashboard = useCallback(async () => {
 		const data = await apiFetch<UserDashboardData>("/api/u/dashboard");
@@ -85,7 +133,6 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 			site_mode: SiteMode;
 		}>("/api/u/models");
 		setModels(result.models);
-		setSiteMode(result.site_mode);
 	}, [apiFetch]);
 
 	const loadTokens = useCallback(async () => {
@@ -100,23 +147,42 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 		setUsage(result.logs);
 	}, [apiFetch]);
 
+	const loadChannels = useCallback(async () => {
+		const result = await apiFetch<{ channels: ChannelItem[]; channel_aliases?: Record<string, ModelAliasesMap> }>("/api/u/channels");
+		setChannels(result.channels);
+		setChannelAliases(result.channel_aliases ?? {});
+	}, [apiFetch]);
+
+	const loadMonitoring = useCallback(async () => {
+		const data = await apiFetch<MonitoringData>("/api/monitoring?range=15m");
+		setMonitoring(data);
+	}, [apiFetch]);
+
+	const handleMonitoringLoaded = useCallback((data: MonitoringData) => {
+		setMonitoring(data);
+	}, []);
+
+	const loadedTabs = useRef<Set<string>>(new Set<string>());
+
 	const loadTab = useCallback(
 		async (tabId: UserTabId) => {
-			setLoading(true);
+			if (!loadedTabs.current!.has(tabId)) setLoading(true);
 			setNotice("");
 			try {
 				if (tabId === "dashboard") await loadDashboard();
+				if (tabId === "monitoring") await loadMonitoring();
 				if (tabId === "models") await loadModels();
-				if (tabId === "tokens") await loadTokens();
+				if (tabId === "tokens") { await loadTokens(); await loadModels(); }
 				if (tabId === "usage") await loadUsage();
-				if (tabId === "channels") await loadModels();
+				if (tabId === "channels") await loadChannels();
+				loadedTabs.current!.add(tabId);
 			} catch (error) {
 				setNotice((error as Error).message);
 			} finally {
 				setLoading(false);
 			}
 		},
-		[loadDashboard, loadModels, loadTokens, loadUsage],
+		[loadDashboard, loadMonitoring, loadModels, loadTokens, loadUsage, loadChannels],
 	);
 
 	useEffect(() => {
@@ -149,15 +215,45 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 		updateToken(null);
 	}, [apiFetch, updateToken]);
 
+	const handleLinuxdoUnbind = useCallback(async () => {
+		try {
+			await apiFetch("/api/u/auth/linuxdo/unbind", { method: "POST" });
+			setNotice("Linux DO 账号已解除绑定");
+			onUserRefresh();
+		} catch (error) {
+			setNotice((error as Error).message);
+		}
+	}, [apiFetch, onUserRefresh]);
+
 	const handleTokenCreate = useCallback(
-		async (name: string) => {
+		async (name: string, allowedChannels?: Record<string, string[]>) => {
 			try {
+				const body: Record<string, unknown> = { name };
+				if (allowedChannels && Object.keys(allowedChannels).length > 0) {
+					body.allowed_channels = allowedChannels;
+				}
 				const result = await apiFetch<{ token: string }>("/api/u/tokens", {
 					method: "POST",
-					body: JSON.stringify({ name }),
+					body: JSON.stringify(body),
 				});
 				setNotice(`新令牌: ${result.token}`);
 				await loadTokens();
+			} catch (error) {
+				setNotice((error as Error).message);
+			}
+		},
+		[apiFetch, loadTokens],
+	);
+
+	const handleTokenUpdate = useCallback(
+		async (id: string, allowedChannels: Record<string, string[]> | null) => {
+			try {
+				await apiFetch(`/api/u/tokens/${id}`, {
+					method: "PATCH",
+					body: JSON.stringify({ allowed_channels: allowedChannels }),
+				});
+				await loadTokens();
+				setNotice("令牌已更新");
 			} catch (error) {
 				setNotice((error as Error).message);
 			}
@@ -227,18 +323,24 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 			);
 		}
 		if (activeTab === "dashboard") {
-			return <UserDashboard data={dashboardData} user={user} />;
+			return <UserDashboard data={dashboardData} user={user} token={token} updateToken={updateToken} linuxdoEnabled={linuxdoEnabled} onUnbind={handleLinuxdoUnbind} onUserRefresh={onUserRefresh} />;
+		}
+		if (activeTab === "monitoring") {
+			return <MonitoringView monitoring={monitoring} token={token} onLoaded={handleMonitoringLoaded} />;
 		}
 		if (activeTab === "models") {
-			return <UserModelsView models={models} siteMode={siteMode} />;
+			return <UserModelsView models={models} />;
 		}
 		if (activeTab === "tokens") {
 			return (
 				<UserTokensView
 					tokens={tokens}
 					onCreate={handleTokenCreate}
+					onUpdate={handleTokenUpdate}
 					onDelete={handleTokenDelete}
 					onReveal={handleTokenReveal}
+					models={models}
+					channelSelectionEnabled={dashboardData?.user_channel_selection_enabled}
 				/>
 			);
 		}
@@ -247,7 +349,7 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 		}
 		if (activeTab === "channels") {
 			return (
-				<UserChannelsView token={token} updateToken={updateToken} />
+				<UserChannelsView token={token} updateToken={updateToken} channels={channels} channelAliases={channelAliases} onRefresh={loadChannels} channelReviewEnabled={dashboardData?.channel_review_enabled ?? false} />
 			);
 		}
 		return null;
@@ -415,7 +517,9 @@ export const UserApp = ({ token, user, updateToken, onNavigate }: UserAppProps) 
 						{notice}
 					</div>
 				)}
-				{renderContent()}
+				<div key={activeTab}>
+					{renderContent()}
+				</div>
 			</main>
 		</div>
 	);

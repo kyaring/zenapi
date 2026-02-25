@@ -13,6 +13,7 @@ import {
 	updateChannelTestResult,
 } from "../services/channel-testing";
 import type { ChannelApiFormat } from "../services/channel-types";
+import { saveChannelAliases } from "../services/model-aliases";
 import { getSiteMode } from "../services/settings";
 import { generateToken } from "../utils/crypto";
 import { jsonError } from "../utils/http";
@@ -22,6 +23,11 @@ import { nowIso } from "../utils/time";
 import { normalizeBaseUrl } from "../utils/url";
 
 const channels = new Hono<AppEnv>();
+
+type AliasConfig = {
+	aliases: string[];
+	alias_only: boolean;
+};
 
 type ChannelPayload = {
 	id?: string | number;
@@ -36,6 +42,7 @@ type ChannelPayload = {
 	models?: unknown[];
 	api_format?: string;
 	custom_headers?: string;
+	model_aliases?: Record<string, AliasConfig>;
 };
 
 /**
@@ -64,7 +71,40 @@ channels.get("/", async (c) => {
 		orderBy: "created_at",
 		order: "DESC",
 	});
-	return c.json({ channels: rows });
+
+	// Collect channel IDs for per-channel alias query
+	const channelIds = rows.map((ch) => ch.id as string);
+
+	// Batch-query per-channel aliases (D1 limits bind params to 100)
+	const channelAliases: Record<string, Record<string, AliasConfig>> = {};
+	if (channelIds.length > 0) {
+		const BATCH_SIZE = 80;
+		for (let i = 0; i < channelIds.length; i += BATCH_SIZE) {
+			const batch = channelIds.slice(i, i + BATCH_SIZE);
+			const placeholders = batch.map(() => "?").join(",");
+			const aliasRows = await c.env.DB.prepare(
+				`SELECT channel_id, model_id, alias, alias_only FROM channel_model_aliases WHERE channel_id IN (${placeholders}) ORDER BY channel_id, model_id, alias`,
+			)
+				.bind(...batch)
+				.all<{ channel_id: string; model_id: string; alias: string; alias_only: number }>();
+
+			for (const row of aliasRows.results ?? []) {
+				if (!channelAliases[row.channel_id]) {
+					channelAliases[row.channel_id] = {};
+				}
+				const chMap = channelAliases[row.channel_id];
+				if (!chMap[row.model_id]) {
+					chMap[row.model_id] = { aliases: [], alias_only: false };
+				}
+				chMap[row.model_id].aliases.push(row.alias);
+				if (row.alias_only === 1) {
+					chMap[row.model_id].alias_only = true;
+				}
+			}
+		}
+	}
+
+	return c.json({ channels: rows, channel_aliases: channelAliases });
 });
 
 /**
@@ -72,7 +112,7 @@ channels.get("/", async (c) => {
  */
 channels.post("/", async (c) => {
 	const body = (await c.req.json().catch(() => null)) as ChannelPayload | null;
-	if (!body?.name || !body?.base_url || !body?.api_key) {
+	if (!body?.name || !body?.base_url) {
 		return jsonError(c, 400, "missing_fields", "missing_fields");
 	}
 
@@ -96,7 +136,7 @@ channels.post("/", async (c) => {
 			apiFormat === "anthropic"
 				? normalizeBaseUrl(String(body.base_url))
 				: String(body.base_url).trim().replace(/\/+$/, ""),
-		api_key: body.api_key,
+		api_key: body.api_key ?? "",
 		weight: Number(body.weight ?? 1),
 		status: body.status ?? "active",
 		rate_limit: body.rate_limit ?? 0,
@@ -110,6 +150,23 @@ channels.post("/", async (c) => {
 		created_at: now,
 		updated_at: now,
 	});
+
+	// Save per-channel model aliases if provided
+	if (body.model_aliases && typeof body.model_aliases === "object") {
+		const modelIds = (body.models ?? []).map((m: unknown) =>
+			typeof m === "string" ? m : (m as { id?: string })?.id ?? "",
+		).filter(Boolean);
+		for (const [modelId, config] of Object.entries(body.model_aliases)) {
+			if (!modelIds.includes(modelId)) continue;
+			await saveChannelAliases(
+				c.env.DB,
+				id,
+				modelId,
+				(config.aliases ?? []).map((a: string) => ({ alias: a })),
+				config.alias_only ?? false,
+			);
+		}
+	}
 
 	return c.json({ id });
 });
@@ -159,6 +216,23 @@ channels.patch("/:id", async (c) => {
 		updated_at: nowIso(),
 	});
 
+	// Save per-channel model aliases if provided
+	if (body.model_aliases && typeof body.model_aliases === "object") {
+		const modelIds = (Array.isArray(models) ? models : []).map((m: unknown) =>
+			typeof m === "string" ? m : (m as { id?: string })?.id ?? "",
+		).filter(Boolean);
+		for (const [modelId, config] of Object.entries(body.model_aliases)) {
+			if (!modelIds.includes(modelId)) continue;
+			await saveChannelAliases(
+				c.env.DB,
+				id,
+				modelId,
+				(config.aliases ?? []).map((a: string) => ({ alias: a })),
+				config.alias_only ?? false,
+			);
+		}
+	}
+
 	return c.json({ ok: true });
 });
 
@@ -198,7 +272,11 @@ channels.post("/:id/test", async (c) => {
 
 	const siteMode = await getSiteMode(c.env.DB);
 
-	// Only overwrite models_json when the test actually returned models
+	// Check if channel already has models filled in
+	const existingModels = safeJsonParse<unknown[]>(channel.models_json, []);
+	const channelHasModels = Array.isArray(existingModels) && existingModels.length > 0;
+
+	// Only overwrite models_json when the test returned models AND channel has no existing models
 	const hasModels = result.models.length > 0;
 	const updateData: {
 		ok: boolean;
@@ -207,7 +285,7 @@ channels.post("/:id/test", async (c) => {
 		existingModelsJson?: string | null;
 		defaultShared?: boolean;
 	} = { ok: true, elapsed: result.elapsed };
-	if (hasModels && result.payload) {
+	if (hasModels && result.payload && !channelHasModels) {
 		const payloadData = Array.isArray(result.payload)
 			? result.payload
 			: ((result.payload as { data?: unknown[] })?.data ?? []);

@@ -8,6 +8,9 @@ import anthropicProxyRoutes from "./routes/anthropic-proxy";
 import authRoutes from "./routes/auth";
 import channelRoutes from "./routes/channels";
 import dashboardRoutes from "./routes/dashboard";
+import inviteCodeRoutes from "./routes/invite-codes";
+import ldohRoutes from "./routes/ldoh";
+import ldohUserRoutes from "./routes/ldoh-user";
 import modelAliasRoutes from "./routes/model-aliases";
 import modelRoutes from "./routes/models";
 import monitoringRoutes from "./routes/monitoring";
@@ -16,6 +19,8 @@ import newapiGroupRoutes from "./routes/newapiGroups";
 import newapiUserRoutes from "./routes/newapiUsers";
 import proxyRoutes from "./routes/proxy";
 import publicRoutes from "./routes/public";
+import rechargeRoutes from "./routes/recharge";
+import withdrawalRoutes from "./routes/withdrawal";
 import settingsRoutes from "./routes/settings";
 import tokenRoutes from "./routes/tokens";
 import userApiRoutes from "./routes/user-api";
@@ -114,7 +119,9 @@ app.use("/api/*", async (c, next) => {
 		p === "/api/user" || p.startsWith("/api/user/") ||
 		p === "/api/group" || p.startsWith("/api/group/") ||
 		p.startsWith("/api/public") ||
-		p.startsWith("/api/u/")
+		p.startsWith("/api/u/") ||
+		p.startsWith("/api/recharge") ||
+		p.startsWith("/api/monitoring")
 	) {
 		return next();
 	}
@@ -132,6 +139,8 @@ app.route("/api/usage", usageRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/monitoring", monitoringRoutes);
 app.route("/api/settings", settingsRoutes);
+app.route("/api/invite-codes", inviteCodeRoutes);
+app.route("/api/ldoh", ldohRoutes);
 app.route("/api/public", publicRoutes);
 app.route("/api/channel", newapiChannelRoutes);
 app.route("/api/user", newapiUserRoutes);
@@ -141,6 +150,9 @@ app.route("/api/users", adminUserRoutes);
 app.route("/api/u/auth", userAuthRoutes);
 app.route("/api/u", userApiRoutes);
 app.route("/api/u/channels", userChannelRoutes);
+app.route("/api/u/ldoh", ldohUserRoutes);
+app.route("/api/recharge", rechargeRoutes);
+app.route("/api/u/withdrawal", withdrawalRoutes);
 
 app.route("/v1", proxyRoutes);
 app.route("/anthropic/v1", anthropicProxyRoutes);

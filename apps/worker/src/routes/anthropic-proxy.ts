@@ -3,7 +3,7 @@ import type { AppEnv } from "../env";
 import { type TokenRecord, tokenAuth } from "../middleware/tokenAuth";
 import { type ChannelRecord, createWeightedOrder } from "../services/channels";
 import { resolveChannelRoute } from "../services/channel-route";
-import { resolveModelNames } from "../services/model-aliases";
+import { loadChannelAliasesByAlias, loadChannelAliasOnlyMap } from "../services/model-aliases";
 import {
 	anthropicToOpenaiRequest,
 	createOpenaiToAnthropicStreamTransform,
@@ -16,14 +16,14 @@ import { jsonError } from "../utils/http";
 import { safeJsonParse } from "../utils/json";
 import { parseApiKeys, shuffleArray } from "../utils/keys";
 import { isRetryableStatus, sleep } from "../utils/retry";
-import { normalizeBaseUrl } from "../utils/url";
+import { cfSafeUrl, normalizeBaseUrl } from "../utils/url";
 import {
 	type NormalizedUsage,
 	normalizeUsage,
 	parseUsageFromHeaders,
 	parseUsageFromSse,
 } from "../utils/usage";
-import { channelSupportsModel, channelSupportsSharedModel, channelSupportsAnyModel, channelSupportsAnySharedModel, filterAllowedChannels, findChannelModelName } from "./proxy";
+import { channelSupportsModel, channelSupportsSharedModel, filterAllowedChannels } from "./proxy";
 
 const anthropicProxy = new Hono<AppEnv>();
 
@@ -47,8 +47,12 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			: null;
 	const isStream = parsedBody?.stream === true;
 
-	// Resolve model aliases — returns all model IDs this name can route to
-	const resolvedNames = model ? await resolveModelNames(c.env.DB, model) : [];
+	// Resolve per-channel aliases for this model name
+	const channelAliasHits = model ? await loadChannelAliasesByAlias(c.env.DB, model) : [];
+	const channelAliasHitMap = new Map(channelAliasHits.map((h) => [h.channel_id, h]));
+
+	// Load per-channel alias-only map
+	const perChannelAliasOnlyMap = await loadChannelAliasOnlyMap(c.env.DB);
 
 	// Convert Anthropic request -> OpenAI format for internal use
 	const openaiBody = parsedBody ? anthropicToOpenaiRequest(parsedBody) : null;
@@ -84,14 +88,21 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 		}
 		candidates = [targetChannel];
 	} else {
-		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord);
-		if (resolvedNames.length > 0) {
+		const allowedChannels = filterAllowedChannels(activeChannels, tokenRecord, model);
+		if (model) {
 			const supportsFn = useSharedFilter
-				? channelSupportsAnySharedModel
-				: channelSupportsAnyModel;
-			candidates = allowedChannels.filter((channel) =>
-				supportsFn(channel, resolvedNames),
-			);
+				? channelSupportsSharedModel
+				: channelSupportsModel;
+			candidates = allowedChannels.filter((channel) => {
+				// Channel matched via per-channel alias → include
+				if (channelAliasHitMap.has(channel.id)) return true;
+				// Channel natively supports this model → include UNLESS alias_only
+				if (supportsFn(channel, model)) {
+					const aliasOnlyModels = perChannelAliasOnlyMap.get(channel.id);
+					return !(aliasOnlyModels?.has(model));
+				}
+				return false;
+			});
 		} else {
 			const supportsFn = useSharedFilter
 				? channelSupportsSharedModel
@@ -112,6 +123,14 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			);
 		}
 		return jsonError(c, 503, "no_available_channels", "no_available_channels");
+	}
+
+	// stream_only channels should not serve non-streaming requests
+	if (!isStream) {
+		candidates = candidates.filter((ch) => !ch.stream_only);
+		if (candidates.length === 0) {
+			return jsonError(c, 400, "stream_required", "所有可用渠道要求使用流式调用");
+		}
 	}
 
 	const ordered = createWeightedOrder(candidates);
@@ -137,9 +156,11 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			let channelRequestText = effectiveRequestText;
 			let channelOpenaiBody = openaiBody;
 			let channelModelName = effectiveModel;
-			if (!targetChannel && resolvedNames.length > 1 && parsedBody) {
-				channelModelName = findChannelModelName(channel, resolvedNames);
-				if (channelModelName !== model) {
+			if (!targetChannel && parsedBody) {
+				// Check if this channel was matched via per-channel alias
+				const aliasHit = channelAliasHitMap.get(channel.id);
+				if (aliasHit) {
+					channelModelName = aliasHit.model_id;
 					const channelParsedBody = { ...parsedBody, model: channelModelName };
 					channelRequestText = JSON.stringify(channelParsedBody);
 					if (openaiBody) {
@@ -155,7 +176,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 					if (apiFormat === "anthropic") {
 						// Pass-through: send original Anthropic body directly
 						const baseUrl = normalizeBaseUrl(channel.base_url);
-						const target = `${baseUrl}/v1/messages`;
+						const target = cfSafeUrl(`${baseUrl}/v1/messages`);
 						const headers = new Headers();
 						headers.set("x-api-key", String(apiKey));
 						headers.set(
@@ -179,7 +200,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 					} else if (apiFormat === "openai") {
 						// Convert Anthropic -> OpenAI, send to OpenAI upstream
 						const baseUrl = channel.base_url.replace(/\/+$/, "");
-						const target = `${baseUrl}/chat/completions`;
+						const target = cfSafeUrl(`${baseUrl}/chat/completions`);
 						const headers = new Headers();
 						headers.set("Authorization", `Bearer ${apiKey}`);
 						headers.set("content-type", "application/json");
@@ -226,7 +247,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 						}
 					} else {
 						// custom: forward as-is
-						const target = channel.base_url;
+						const target = cfSafeUrl(channel.base_url);
 						const headers = new Headers();
 						headers.set("Authorization", `Bearer ${apiKey}`);
 						headers.set("x-api-key", String(apiKey));
@@ -299,6 +320,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 			firstTokenLatencyMs: isStream ? null : latencyMs,
 			stream: isStream,
 			status: "error",
+			errorMessage: "upstream_unavailable",
 		});
 		return jsonError(c, 502, "upstream_unavailable", "upstream_unavailable");
 	}
@@ -307,6 +329,17 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 	const channelForUsage = selectedChannel ?? lastChannel;
 	if (channelForUsage && lastResponse) {
 		const price = getModelPrice(channelForUsage.models_json, selectedModelName ?? "");
+		let errorCode: number | null = null;
+		let errorMessage: string | null = null;
+		if (!lastResponse.ok) {
+			errorCode = lastResponse.status;
+			try {
+				const errText = await lastResponse.clone().text();
+				errorMessage = errText.slice(0, 512);
+			} catch {
+				errorMessage = null;
+			}
+		}
 		const recordFn = async (
 			usage: NormalizedUsage | null,
 			firstTokenLatencyMs?: number | null,
@@ -317,7 +350,7 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 				completionTokens: 0,
 			};
 			const cost = price
-				? calculateCost(price, normalized.promptTokens, normalized.completionTokens)
+				? calculateCost(price, normalized.promptTokens, normalized.completionTokens, normalized.totalTokens)
 				: 0;
 			await recordUsage(c.env.DB, {
 				tokenId: tokenRecord.id,
@@ -333,6 +366,8 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 					firstTokenLatencyMs ?? (isStream ? null : latencyMs),
 				stream: isStream,
 				status: lastResponse.ok ? "ok" : "error",
+				errorCode,
+				errorMessage,
 			});
 			// Deduct user balance
 			if (cost > 0 && tokenRecord.user_id) {
@@ -355,7 +390,12 @@ anthropicProxy.post("/messages", tokenAuth, async (c) => {
 					const usage = headerUsage ?? streamUsage.usage;
 					return recordFn(usage, streamUsage.firstTokenLatencyMs);
 				})
-				.catch(() => undefined);
+				.catch(async () => {
+					// SSE parsing failed (stream interrupted, etc.) — still record with whatever we have
+					try {
+						await recordFn(headerUsage, null);
+					} catch { /* truly lost */ }
+				});
 			if (executionCtx?.waitUntil) {
 				executionCtx.waitUntil(task);
 			} else {

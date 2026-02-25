@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "hono/jsx/dom";
 import { createApiFetch } from "./core/api";
 import { UserLoginView } from "./features/UserLoginView";
 import { UserRegisterView } from "./features/UserRegisterView";
+import type { RegistrationMode } from "./core/types";
 
 const normalizePath = (path: string) => {
 	if (path.length <= 1) return "/";
@@ -12,9 +13,12 @@ type PublicAppProps = {
 	onUserLogin: (token: string) => void;
 	onNavigate: (path: string) => void;
 	siteMode: "personal" | "service" | "shared";
+	linuxdoEnabled: boolean;
+	registrationMode: RegistrationMode;
+	requireInviteCode: boolean;
 };
 
-export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps) => {
+export const PublicApp = ({ onUserLogin, onNavigate, siteMode, linuxdoEnabled, registrationMode, requireInviteCode }: PublicAppProps) => {
 	const [page, setPage] = useState<"login" | "register">(() => {
 		const normalized = normalizePath(window.location.pathname);
 		if (normalized === "/register") return "register";
@@ -36,6 +40,32 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps)
 		window.addEventListener("popstate", handlePopState);
 		return () => window.removeEventListener("popstate", handlePopState);
 	}, []);
+
+	// Handle Linux DO OAuth callback
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const linuxdoToken = params.get("linuxdo_token");
+		const linuxdoError = params.get("linuxdo_error");
+		if (linuxdoToken) {
+			// Clean up URL
+			history.replaceState(null, "", "/login");
+			onUserLogin(linuxdoToken);
+		} else if (linuxdoError) {
+			history.replaceState(null, "", "/login");
+			const errorMessages: Record<string, string> = {
+				missing_code_or_state: "授权失败：缺少授权码",
+				missing_state_cookie: "授权失败：状态验证失败",
+				state_mismatch: "授权失败：状态不匹配",
+				token_exchange_failed: "授权失败：令牌交换失败",
+				user_info_failed: "授权失败：获取用户信息失败",
+				linuxdo_account_restricted: "授权失败：Linux DO 账号受限",
+				user_disabled: "授权失败：用户已被禁用",
+				registration_disabled: "授权失败：注册已关闭",
+				invalid_invite_code: "授权失败：邀请码无效或已用完",
+			};
+			setNotice(errorMessages[linuxdoError] ?? `授权失败：${linuxdoError}`);
+		}
+	}, [onUserLogin]);
 
 	const navigate = useCallback((target: "login" | "register") => {
 		const paths = { login: "/login", register: "/register" };
@@ -61,14 +91,14 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps)
 	);
 
 	const handleRegister = useCallback(
-		async (email: string, name: string, password: string) => {
+		async (email: string, name: string, password: string, inviteCode?: string) => {
 			try {
 				const api = apiFetch();
 				const result = await api<{ token: string }>(
 					"/api/u/auth/register",
 					{
 						method: "POST",
-						body: JSON.stringify({ email, name, password }),
+						body: JSON.stringify({ email, name, password, invite_code: inviteCode }),
 					},
 				);
 				onUserLogin(result.token);
@@ -115,6 +145,9 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps)
 					onSubmit={handleRegister}
 					onGoLogin={() => navigate("login")}
 					onNavigate={onNavigate}
+					linuxdoEnabled={linuxdoEnabled}
+					registrationMode={registrationMode}
+					requireInviteCode={requireInviteCode}
 				/>
 			</div>
 		);
@@ -133,6 +166,7 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps)
 						ZenAPI
 					</button>
 					<div class="flex gap-3">
+						{registrationMode !== "closed" && (
 						<button
 							type="button"
 							class="rounded-lg px-4 py-2 text-sm text-stone-500 hover:text-stone-900"
@@ -140,6 +174,7 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps)
 						>
 							注册
 						</button>
+						)}
 						<button
 							type="button"
 							class="rounded-lg px-4 py-2 text-sm text-stone-400 hover:text-stone-600"
@@ -155,6 +190,9 @@ export const PublicApp = ({ onUserLogin, onNavigate, siteMode }: PublicAppProps)
 				onSubmit={handleLogin}
 				onGoRegister={() => navigate("register")}
 				onNavigate={onNavigate}
+				linuxdoEnabled={linuxdoEnabled}
+				registrationMode={registrationMode}
+				requireInviteCode={requireInviteCode}
 			/>
 		</div>
 	);
