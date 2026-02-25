@@ -151,6 +151,7 @@ export type Settings = {
 	ldc_epay_key: string;
 	ldc_epay_gateway: string;
 	ldc_exchange_rate: number;
+	ldoh_cookie: string;
 };
 
 export type ModelChannel = {
@@ -191,7 +192,8 @@ export type TabId =
 	| "usage"
 	| "settings"
 	| "users"
-	| "playground";
+	| "playground"
+	| "ldoh";
 
 export type TabItem = {
 	id: TabId;
@@ -227,6 +229,7 @@ export type SettingsForm = {
 	ldc_epay_key: string;
 	ldc_epay_gateway: string;
 	ldc_exchange_rate: string;
+	ldoh_cookie: string;
 };
 
 // User types
@@ -276,6 +279,7 @@ export type UserDashboardData = {
 	withdrawal_enabled: boolean;
 	withdrawal_fee_rate: number;
 	user_channel_selection_enabled: boolean;
+	violations: LdohViolation[];
 };
 
 export type UserTabId =
@@ -316,5 +320,44 @@ export type RechargeOrder = {
 	ldc_amount: number;
 	balance_amount: number;
 	status: string;
+	created_at: string;
+};
+
+export type LdohSite = {
+	id: string;
+	name: string;
+	description?: string;
+	api_base_url: string;
+	api_base_hostname: string;
+	tags_json?: string;
+	is_visible: number;
+	source: string;
+	synced_at: string;
+	maintainers?: LdohSiteMaintainer[];
+	blocked?: Array<{ id: string; hostname: string }>;
+	pending_channels?: number;
+	violation_count?: number;
+};
+
+export type LdohSiteMaintainer = {
+	id: string;
+	site_id: string;
+	user_id?: string;
+	name: string;
+	username: string;
+	linuxdo_id?: string;
+	approved: number;
+	source: string;
+};
+
+export type LdohViolation = {
+	id: string;
+	user_id: string;
+	user_name: string;
+	linuxdo_username?: string;
+	attempted_base_url: string;
+	matched_hostname: string;
+	site_id: string;
+	site_name: string;
 	created_at: string;
 };

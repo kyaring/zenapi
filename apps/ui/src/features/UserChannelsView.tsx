@@ -1,7 +1,24 @@
-import { useCallback, useMemo, useState } from "hono/jsx/dom";
+import { useCallback, useEffect, useMemo, useState } from "hono/jsx/dom";
 import { createApiFetch } from "../core/api";
-import type { ChannelApiFormat } from "../core/types";
+import type { ChannelApiFormat, LdohViolation } from "../core/types";
 import type { ModelAliasConfig, ModelAliasesMap } from "../UserApp";
+
+type MaintainerSite = {
+	id: string;
+	name: string;
+	api_base_hostname: string;
+	maintainer_id: string;
+	blocked?: Array<{ id: string; hostname: string }>;
+};
+
+type MaintainerChannel = {
+	id: string;
+	name: string;
+	base_url: string;
+	status: string;
+	user_name?: string;
+	linuxdo_username?: string;
+};
 
 type ChannelItem = {
 	id: string;
@@ -113,11 +130,99 @@ export const UserChannelsView = ({
 	const [pricingState, setPricingState] = useState<Record<string, ModelPricingConfig>>({});
 	// Track which models have their alias editor expanded
 	const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
+	// Maintainer panel state
+	const [mySites, setMySites] = useState<MaintainerSite[]>([]);
+	const [siteChannels, setSiteChannels] = useState<Record<string, MaintainerChannel[]>>({});
+	const [siteViolations, setSiteViolations] = useState<Record<string, LdohViolation[]>>({});
+	const [claimUrl, setClaimUrl] = useState("");
+	const [claimNotice, setClaimNotice] = useState("");
+	const [maintainerNotice, setMaintainerNotice] = useState("");
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
 		[token, updateToken],
 	);
+
+	const loadMySites = useCallback(async () => {
+		try {
+			const result = await apiFetch<{ sites: MaintainerSite[] }>("/api/u/ldoh/my-sites");
+			setMySites(result.sites);
+			// Load channels & violations for each site
+			const chMap: Record<string, MaintainerChannel[]> = {};
+			const vMap: Record<string, LdohViolation[]> = {};
+			for (const site of result.sites) {
+				try {
+					const chResult = await apiFetch<{ channels: MaintainerChannel[] }>(`/api/u/ldoh/sites/${site.id}/channels`);
+					chMap[site.id] = chResult.channels;
+				} catch { chMap[site.id] = []; }
+				try {
+					const vResult = await apiFetch<{ violations: LdohViolation[] }>(`/api/u/ldoh/sites/${site.id}/violations`);
+					vMap[site.id] = vResult.violations;
+				} catch { vMap[site.id] = []; }
+			}
+			setSiteChannels(chMap);
+			setSiteViolations(vMap);
+		} catch { /* ignore */ }
+	}, [apiFetch]);
+
+	useEffect(() => { loadMySites(); }, [loadMySites]);
+
+	const handleBlock = useCallback(async (siteId: string) => {
+		try {
+			await apiFetch(`/api/u/ldoh/sites/${siteId}/block`, { method: "POST" });
+			setMaintainerNotice("已封禁");
+			await loadMySites();
+		} catch (error) { setMaintainerNotice((error as Error).message); }
+	}, [apiFetch, loadMySites]);
+
+	const handleUnblock = useCallback(async (siteId: string) => {
+		try {
+			await apiFetch(`/api/u/ldoh/sites/${siteId}/block`, { method: "DELETE" });
+			setMaintainerNotice("已解封");
+			await loadMySites();
+		} catch (error) { setMaintainerNotice((error as Error).message); }
+	}, [apiFetch, loadMySites]);
+
+	const handleMaintainerApproveChannel = useCallback(async (channelId: string) => {
+		try {
+			await apiFetch(`/api/u/ldoh/channels/${channelId}/approve`, { method: "POST" });
+			setMaintainerNotice("渠道已批准");
+			await loadMySites();
+		} catch (error) { setMaintainerNotice((error as Error).message); }
+	}, [apiFetch, loadMySites]);
+
+	const handleMaintainerRejectChannel = useCallback(async (channelId: string) => {
+		try {
+			await apiFetch(`/api/u/ldoh/channels/${channelId}/reject`, { method: "POST" });
+			setMaintainerNotice("渠道已拒绝");
+			await loadMySites();
+		} catch (error) { setMaintainerNotice((error as Error).message); }
+	}, [apiFetch, loadMySites]);
+
+	const handleMaintainerDeleteChannel = useCallback(async (channelId: string) => {
+		if (!window.confirm("确定要删除该渠道吗？")) return;
+		try {
+			await apiFetch(`/api/u/ldoh/channels/${channelId}`, { method: "DELETE" });
+			setMaintainerNotice("渠道已删除");
+			await loadMySites();
+		} catch (error) { setMaintainerNotice((error as Error).message); }
+	}, [apiFetch, loadMySites]);
+
+	const handleClaimSite = useCallback(async () => {
+		if (!claimUrl.trim()) {
+			setClaimNotice("请输入 API Base URL");
+			return;
+		}
+		try {
+			const result = await apiFetch<{ ok?: boolean; message?: string }>("/api/u/ldoh/claim-site", {
+				method: "POST",
+				body: JSON.stringify({ apiBaseUrl: claimUrl.trim() }),
+			});
+			setClaimNotice(result.message || "声明已提交");
+			setClaimUrl("");
+			await loadMySites();
+		} catch (error) { setClaimNotice((error as Error).message); }
+	}, [apiFetch, claimUrl, loadMySites]);
 
 	const openCreate = useCallback(() => {
 		setEditingChannel(null);
@@ -307,6 +412,177 @@ export const UserChannelsView = ({
 	}, []);
 
 	return (
+		<div class="space-y-5">
+		{/* Maintainer panel */}
+		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+			<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
+				站点维护
+			</h3>
+			{maintainerNotice && (
+				<div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+					{maintainerNotice}
+				</div>
+			)}
+			{mySites.length > 0 ? (
+				<div class="space-y-4">
+					{mySites.map((site) => {
+						const isBlocked = (site.blocked ?? []).length > 0;
+						const channels = siteChannels[site.id] ?? [];
+						const pendingChs = channels.filter((ch) => ch.status === "pending");
+						const violations = siteViolations[site.id] ?? [];
+						return (
+							<div key={site.id} class="rounded-xl border border-stone-200 p-4">
+								<div class="flex items-center justify-between mb-3">
+									<div>
+										<span class="font-medium text-stone-700">{site.name}</span>
+										<span class="ml-2 text-xs text-stone-400">{site.api_base_hostname}</span>
+									</div>
+									<div class="flex gap-2">
+										{isBlocked ? (
+											<button
+												type="button"
+												class="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
+												onClick={() => handleUnblock(site.id)}
+											>
+												解除封禁
+											</button>
+										) : (
+											<button
+												type="button"
+												class="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-50"
+												onClick={() => handleBlock(site.id)}
+											>
+												封禁
+											</button>
+										)}
+									</div>
+								</div>
+								{isBlocked && (
+									<div class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">
+										此站点 hostname 已被封禁，其他用户无法提交匹配的渠道
+									</div>
+								)}
+								{/* Pending channels for approval */}
+								{pendingChs.length > 0 && (
+									<div class="mb-3">
+										<p class="mb-1 text-xs font-medium text-amber-600">待审批渠道 ({pendingChs.length})</p>
+										<div class="space-y-1">
+											{pendingChs.map((ch) => (
+												<div key={ch.id} class="flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+													<div>
+														<span class="text-sm text-stone-700">{ch.name}</span>
+														<span class="ml-2 text-xs text-stone-400">{ch.user_name ?? ""}</span>
+													</div>
+													<div class="flex gap-2">
+														<button
+															type="button"
+															class="text-xs text-emerald-600 hover:text-emerald-700"
+															onClick={() => handleMaintainerApproveChannel(ch.id)}
+														>
+															批准
+														</button>
+														<button
+															type="button"
+															class="text-xs text-red-500 hover:text-red-600"
+															onClick={() => handleMaintainerRejectChannel(ch.id)}
+														>
+															拒绝
+														</button>
+													</div>
+												</div>
+											))}
+										</div>
+									</div>
+								)}
+								{/* All matching channels */}
+								{channels.length > 0 && (
+									<div class="mb-3">
+										<p class="mb-1 text-xs font-medium text-stone-500">匹配渠道 ({channels.length})</p>
+										<div class="overflow-x-auto">
+											<table class="w-full text-left text-xs">
+												<thead>
+													<tr class="border-b border-stone-100 text-stone-400">
+														<th class="pb-1 pr-3 font-medium">名称</th>
+														<th class="pb-1 pr-3 font-medium">状态</th>
+														<th class="pb-1 pr-3 font-medium">提交者</th>
+														<th class="pb-1 font-medium">操作</th>
+													</tr>
+												</thead>
+												<tbody>
+													{channels.map((ch) => (
+														<tr key={ch.id} class="border-b border-stone-50">
+															<td class="py-1.5 pr-3 text-stone-700">{ch.name}</td>
+															<td class="py-1.5 pr-3">
+																<span class={`rounded-full px-2 py-0.5 text-xs ${ch.status === "active" ? "bg-emerald-50 text-emerald-600" : ch.status === "pending" ? "bg-amber-50 text-amber-600" : "bg-stone-100 text-stone-500"}`}>
+																	{ch.status}
+																</span>
+															</td>
+															<td class="py-1.5 pr-3 text-stone-500">{ch.user_name ?? "-"}</td>
+															<td class="py-1.5">
+																<button
+																	type="button"
+																	class="text-xs text-red-500 hover:text-red-600"
+																	onClick={() => handleMaintainerDeleteChannel(ch.id)}
+																>
+																	删除
+																</button>
+															</td>
+														</tr>
+													))}
+												</tbody>
+											</table>
+										</div>
+									</div>
+								)}
+								{/* Violations */}
+								{violations.length > 0 && (
+									<div>
+										<p class="mb-1 text-xs font-medium text-red-500">违规记录 ({violations.length})</p>
+										<div class="space-y-1">
+											{violations.map((v) => (
+												<div key={v.id} class="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-600">
+													{v.user_name} ({v.linuxdo_username ?? "-"}) 尝试提交 {v.attempted_base_url} - {v.created_at?.slice(0, 16)}
+												</div>
+											))}
+										</div>
+									</div>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			) : (
+				<p class="text-sm text-stone-400">你暂未维护任何公益站</p>
+			)}
+			{/* Claim site */}
+			<div class="mt-4 border-t border-stone-100 pt-4">
+				<p class="mb-2 text-xs font-medium text-stone-500">声明维护站点</p>
+				{claimNotice && (
+					<div class="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+						{claimNotice}
+					</div>
+				)}
+				<div class="flex gap-2">
+					<input
+						class="flex-1 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+						type="url"
+						placeholder="输入你的公益站 API Base URL"
+						value={claimUrl}
+						onInput={(e) => setClaimUrl((e.currentTarget as HTMLInputElement)?.value ?? "")}
+					/>
+					<button
+						type="button"
+						class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-all hover:shadow-lg"
+						onClick={handleClaimSite}
+					>
+						声明
+					</button>
+				</div>
+				<p class="mt-1 text-xs text-stone-400">声明后需等待管理员审批才能获得维护者权限</p>
+			</div>
+		</div>
+
+		{/* Channels table */}
 		<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
 			<div class="mb-4 flex items-center justify-between">
 				<div class="flex items-center gap-3">
@@ -689,6 +965,7 @@ export const UserChannelsView = ({
 					</div>
 				</div>
 			)}
+		</div>
 		</div>
 	);
 };

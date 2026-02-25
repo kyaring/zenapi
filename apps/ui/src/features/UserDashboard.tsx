@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "hono/jsx/dom";
 import { createApiFetch } from "../core/api";
-import type { ContributionEntry, User, UserDashboardData } from "../core/types";
+import type { ContributionEntry, LdohViolation, User, UserDashboardData } from "../core/types";
 
 type UserDashboardProps = {
 	data: UserDashboardData | null;
@@ -526,6 +526,41 @@ export const UserDashboard = ({ data, user, token, updateToken, linuxdoEnabled, 
 			{/* Contribution leaderboard */}
 			{data.contributions.length > 0 && (
 				<ContributionBoard contributions={data.contributions} />
+			)}
+			{/* Violations shame wall */}
+			{data.violations && data.violations.length > 0 && (
+				<div class="rounded-2xl border-2 border-red-300 bg-white p-5 shadow-lg">
+					<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-red-700">
+						违规记录
+					</h3>
+					<p class="mb-3 text-xs text-red-500">
+						以下用户尝试提交公益站维护者已封禁的 API 地址
+					</p>
+					<div class="overflow-x-auto">
+						<table class="w-full text-left text-sm">
+							<thead>
+								<tr class="border-b border-red-100 text-xs uppercase tracking-widest text-red-400">
+									<th class="pb-2 pr-4 font-medium">用户</th>
+									<th class="pb-2 pr-4 font-medium">LinuxDO</th>
+									<th class="pb-2 pr-4 font-medium">尝试 URL</th>
+									<th class="pb-2 pr-4 font-medium">站点</th>
+									<th class="pb-2 font-medium">时间</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.violations.map((v: LdohViolation) => (
+									<tr key={v.id} class="border-b border-red-50">
+										<td class="py-2 pr-4 text-stone-700">{v.user_name}</td>
+										<td class="py-2 pr-4 text-stone-500">{v.linuxdo_username ?? "-"}</td>
+										<td class="py-2 pr-4 text-xs text-stone-500 max-w-[200px] truncate">{v.attempted_base_url}</td>
+										<td class="py-2 pr-4 text-stone-600">{v.site_name}</td>
+										<td class="py-2 text-xs text-stone-400">{v.created_at?.slice(0, 16)}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</div>
 			)}
 		</div>
 	);

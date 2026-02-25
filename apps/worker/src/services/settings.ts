@@ -428,3 +428,18 @@ export async function setWithdrawalMode(
 ): Promise<void> {
 	await upsertSetting(db, WITHDRAWAL_MODE_KEY, mode);
 }
+
+// LDOH cookie for syncing public sites
+const LDOH_COOKIE_KEY = "ldoh_cookie";
+
+export async function getLdohCookie(db: D1Database): Promise<string> {
+	const value = await readSetting(db, LDOH_COOKIE_KEY);
+	return value ?? "";
+}
+
+export async function setLdohCookie(
+	db: D1Database,
+	cookie: string,
+): Promise<void> {
+	await upsertSetting(db, LDOH_COOKIE_KEY, cookie);
+}

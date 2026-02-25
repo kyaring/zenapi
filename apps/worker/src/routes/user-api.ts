@@ -432,6 +432,12 @@ userApi.get("/dashboard", async (c) => {
 		}));
 	}
 
+	// Fetch recent violations for shame wall
+	const violationsResult = await c.env.DB.prepare(
+		"SELECT * FROM ldoh_violations ORDER BY created_at DESC LIMIT 50",
+	).all();
+	const violationRows = violationsResult.results ?? [];
+
 	return c.json({
 		balance: user.balance,
 		withdrawable_balance: Math.min(user.balance, user.withdrawable_balance),
@@ -447,6 +453,7 @@ userApi.get("/dashboard", async (c) => {
 		withdrawal_enabled: withdrawalEnabled,
 		withdrawal_fee_rate: withdrawalFeeRate,
 		user_channel_selection_enabled: userChannelSelectionEnabled,
+		violations: violationRows,
 	});
 });
 

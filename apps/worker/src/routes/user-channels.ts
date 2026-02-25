@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
+import type { UserRecord } from "../middleware/userAuth";
 import { userAuth } from "../middleware/userAuth";
 import { saveChannelAliases } from "../services/model-aliases";
 import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
+import { extractHostname } from "../utils/url";
 
 type AliasConfig = {
 	aliases: string[];
@@ -79,9 +81,57 @@ userChannels.post("/", async (c) => {
 	}
 
 	const userId = c.get("userId") as string;
+	const user = c.get("userRecord") as UserRecord;
 	const body = await c.req.json().catch(() => null);
 	if (!body?.name || !body?.base_url) {
 		return jsonError(c, 400, "missing_fields", "name, base_url required");
+	}
+
+	// LDOH protection: check blocked hostnames and pending requirement
+	const baseUrl = String(body.base_url).trim();
+	const hostname = extractHostname(baseUrl);
+	let channelStatus = "active";
+
+	if (hostname) {
+		// Check if hostname is blocked
+		const blocked = await c.env.DB.prepare(
+			"SELECT b.id, b.site_id, s.name as site_name FROM ldoh_blocked_urls b JOIN ldoh_sites s ON s.id = b.site_id WHERE b.hostname = ?",
+		)
+			.bind(hostname)
+			.first<{ id: string; site_id: string; site_name: string }>();
+
+		if (blocked) {
+			// Record violation
+			const violationId = crypto.randomUUID();
+			await c.env.DB.prepare(
+				"INSERT INTO ldoh_violations (id, user_id, user_name, linuxdo_username, attempted_base_url, matched_hostname, site_id, site_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			)
+				.bind(
+					violationId,
+					userId,
+					user.name,
+					user.linuxdo_username || null,
+					baseUrl,
+					hostname,
+					blocked.site_id,
+					blocked.site_name,
+					nowIso(),
+				)
+				.run();
+
+			return jsonError(c, 403, "hostname_blocked", "该 API 地址已被站点维护者封禁");
+		}
+
+		// Check if hostname matches an LDOH site → require pending approval
+		const matchedSite = await c.env.DB.prepare(
+			"SELECT id FROM ldoh_sites WHERE api_base_hostname = ?",
+		)
+			.bind(hostname)
+			.first();
+
+		if (matchedSite) {
+			channelStatus = "pending";
+		}
 	}
 
 	const id = crypto.randomUUID();
@@ -101,7 +151,7 @@ userChannels.post("/", async (c) => {
 			String(body.base_url).trim(),
 			String(body.api_key ?? "").trim(),
 			body.weight ?? 1,
-			"active",
+			channelStatus,
 			body.api_format ?? "openai",
 			modelsJson,
 			body.custom_headers ? String(body.custom_headers) : null,
@@ -134,7 +184,7 @@ userChannels.post("/", async (c) => {
 		}
 	}
 
-	return c.json({ id });
+	return c.json({ id, status: channelStatus, message: channelStatus === "pending" ? "渠道已创建，等待审批" : undefined });
 });
 
 /**

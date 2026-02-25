@@ -18,6 +18,7 @@ export const tabs: TabItem[] = [
 	{ id: "settings", label: "系统设置" },
 	{ id: "users", label: "用户管理" },
 	{ id: "playground", label: "对话测试" },
+	{ id: "ldoh", label: "公益站" },
 ];
 
 export const userTabs: UserTabItem[] = [
@@ -67,4 +68,5 @@ export const initialSettingsForm: SettingsForm = {
 	ldc_epay_key: "",
 	ldc_epay_gateway: "https://credit.linux.do/epay",
 	ldc_exchange_rate: "0.1",
+	ldoh_cookie: "",
 };

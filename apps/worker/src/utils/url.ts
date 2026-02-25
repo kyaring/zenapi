@@ -19,6 +19,21 @@ export function normalizeBaseUrl(baseUrl: string): string {
  * Rewrites bare-IP URLs to use sslip.io so Cloudflare Workers can fetch them.
  * e.g. http://1.2.3.4:8080/v1 → http://1.2.3.4.sslip.io:8080/v1
  */
+/**
+ * Extracts the hostname from a URL string, lowercased.
+ */
+export function extractHostname(url: string): string {
+	try {
+		return new URL(url).hostname.toLowerCase();
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Rewrites bare-IP URLs to use sslip.io so Cloudflare Workers can fetch them.
+ * e.g. http://1.2.3.4:8080/v1 → http://1.2.3.4.sslip.io:8080/v1
+ */
 export function cfSafeUrl(url: string): string {
 	try {
 		const parsed = new URL(url);

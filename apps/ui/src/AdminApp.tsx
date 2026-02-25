@@ -17,6 +17,9 @@ import type {
 	ChannelForm,
 	DashboardData,
 	InviteCode,
+	LdohSite,
+	LdohSiteMaintainer,
+	LdohViolation,
 	ModelItem,
 	MonitoringData,
 	Settings,
@@ -39,6 +42,7 @@ import { TokensView } from "./features/TokensView";
 import { UsageView } from "./features/UsageView";
 import { UsersView } from "./features/UsersView";
 import { PlaygroundView } from "./features/PlaygroundView";
+import { LdohView } from "./features/LdohView";
 
 type AdminAppProps = {
 	token: string;
@@ -61,6 +65,7 @@ const adminTabToPath: Record<TabId, string> = {
 	settings: "/admin/settings",
 	users: "/admin/users",
 	playground: "/admin/playground",
+	ldoh: "/admin/ldoh",
 };
 
 const adminPathToTab: Record<string, TabId> = {
@@ -73,6 +78,7 @@ const adminPathToTab: Record<string, TabId> = {
 	"/admin/settings": "settings",
 	"/admin/users": "users",
 	"/admin/playground": "playground",
+	"/admin/ldoh": "ldoh",
 };
 
 export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
@@ -101,6 +107,10 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
 	const [users, setUsers] = useState<User[]>([]);
 	const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
+	const [ldohSites, setLdohSites] = useState<LdohSite[]>([]);
+	const [ldohViolations, setLdohViolations] = useState<LdohViolation[]>([]);
+	const [ldohPendingMaintainers, setLdohPendingMaintainers] = useState<LdohSiteMaintainer[]>([]);
+	const [ldohPendingChannels, setLdohPendingChannels] = useState<Array<{ id: string; name: string; base_url: string; status: string; user_name?: string; site_name?: string }>>([]);
 
 	const apiFetch = useMemo(
 		() => createApiFetch(token, () => updateToken(null)),
@@ -164,6 +174,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 			ldc_epay_key: settings.ldc_epay_key ?? "",
 			ldc_epay_gateway: settings.ldc_epay_gateway ?? "https://credit.linux.do/epay",
 			ldc_exchange_rate: String(settings.ldc_exchange_rate ?? 0.1),
+			ldoh_cookie: settings.ldoh_cookie ?? "",
 		});
 		if (settings.require_invite_code) {
 			const result = await apiFetch<{ codes: InviteCode[] }>("/api/invite-codes");
@@ -174,6 +185,32 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 	const loadUsers = useCallback(async () => {
 		const result = await apiFetch<{ users: User[] }>("/api/users");
 		setUsers(result.users);
+	}, [apiFetch]);
+
+	const loadLdoh = useCallback(async () => {
+		const sitesResult = await apiFetch<{ sites: LdohSite[] }>("/api/ldoh/sites");
+		setLdohSites(sitesResult.sites);
+
+		const violationsResult = await apiFetch<{ violations: LdohViolation[] }>("/api/ldoh/violations");
+		setLdohViolations(violationsResult.violations);
+
+		// Extract pending maintainers from sites
+		const pending: LdohSiteMaintainer[] = [];
+		for (const site of sitesResult.sites) {
+			for (const m of site.maintainers ?? []) {
+				if (!m.approved) {
+					pending.push(m);
+				}
+			}
+		}
+		setLdohPendingMaintainers(pending);
+
+		// Fetch pending channels
+		const channelsResult = await apiFetch<{ channels: Channel[] }>("/api/channels");
+		const pendingChs = (channelsResult.channels ?? [])
+			.filter((ch) => ch.status === "pending")
+			.map((ch) => ({ id: ch.id, name: ch.name, base_url: ch.base_url, status: ch.status }));
+		setLdohPendingChannels(pendingChs);
 	}, [apiFetch]);
 
 	const loadTab = useCallback(
@@ -189,6 +226,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 				if (tabId === "usage") await loadUsage();
 				if (tabId === "settings") await loadSettings();
 				if (tabId === "users") await loadUsers();
+				if (tabId === "ldoh") await loadLdoh();
 				if (tabId === "playground") { /* no data to preload */ }
 			} catch (error) {
 				setNotice((error as Error).message);
@@ -199,6 +237,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		[
 			loadChannels,
 			loadDashboard,
+			loadLdoh,
 			loadModels,
 			loadMonitoring,
 			loadSettings,
@@ -486,6 +525,35 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		[apiFetch, loadTokens],
 	);
 
+	const handleLdohSync = useCallback(async () => {
+		await apiFetch("/api/ldoh/sync", { method: "POST" });
+		await loadLdoh();
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohApproveMaintainer = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/maintainers/${id}/approve`, { method: "POST" });
+		await loadLdoh();
+		setNotice("维护者已批准");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohRejectMaintainer = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/maintainers/${id}`, { method: "DELETE" });
+		await loadLdoh();
+		setNotice("维护者已移除");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohApproveChannel = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/channels/${id}/approve`, { method: "POST" });
+		await loadLdoh();
+		setNotice("渠道已批准");
+	}, [apiFetch, loadLdoh]);
+
+	const handleLdohRejectChannel = useCallback(async (id: string) => {
+		await apiFetch(`/api/ldoh/channels/${id}/reject`, { method: "POST" });
+		await loadLdoh();
+		setNotice("渠道已拒绝");
+	}, [apiFetch, loadLdoh]);
+
 	const handleSettingsSubmit = useCallback(
 		async (event: Event) => {
 			event.preventDefault();
@@ -509,6 +577,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 				ldc_epay_key: settingsForm.ldc_epay_key,
 				ldc_epay_gateway: settingsForm.ldc_epay_gateway,
 				ldc_exchange_rate: Number(settingsForm.ldc_exchange_rate),
+				ldoh_cookie: settingsForm.ldoh_cookie,
 			};
 			const password = settingsForm.admin_password.trim();
 			if (password) {
@@ -931,6 +1000,21 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		}
 		if (activeTab === "playground") {
 			return <PlaygroundView token={token} />;
+		}
+		if (activeTab === "ldoh") {
+			return (
+				<LdohView
+					sites={ldohSites}
+					violations={ldohViolations}
+					pendingMaintainers={ldohPendingMaintainers}
+					pendingChannels={ldohPendingChannels}
+					onSync={handleLdohSync}
+					onApproveMaintainer={handleLdohApproveMaintainer}
+					onRejectMaintainer={handleLdohRejectMaintainer}
+					onApproveChannel={handleLdohApproveChannel}
+					onRejectChannel={handleLdohRejectChannel}
+				/>
+			);
 		}
 		return (
 			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">

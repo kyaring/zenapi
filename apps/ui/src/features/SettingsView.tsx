@@ -288,6 +288,33 @@ export const SettingsView = ({
 				</p>
 			</div>
 			)}
+			{settingsForm.site_mode === "shared" && (
+			<div class="lg:col-span-2 border-t border-stone-100 pt-4 mt-1">
+				<label
+					class="mb-1.5 block text-xs uppercase tracking-widest text-stone-500"
+					for="ldoh-cookie"
+				>
+					LDOH Cookie（公益站同步）
+				</label>
+				<input
+					class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+					id="ldoh-cookie"
+					name="ldoh_cookie"
+					type="password"
+					placeholder="留空则不启用公益站同步"
+					value={settingsForm.ldoh_cookie}
+					onInput={(event) => {
+						const target = event.currentTarget as HTMLInputElement | null;
+						onFormChange({
+							ldoh_cookie: target?.value ?? "",
+						});
+					}}
+				/>
+				<p class="mt-1 text-xs text-stone-500">
+					用于从 ldoh.105117.xyz 同步公益站列表，在公益站管理页面可触发同步
+				</p>
+			</div>
+			)}
 			{settingsForm.site_mode !== "personal" && (
 			<div class="lg:col-span-2 border-t border-stone-100 pt-4 mt-1">
 				<label class="flex items-center gap-2 text-sm text-stone-700">
