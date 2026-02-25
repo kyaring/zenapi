@@ -146,8 +146,7 @@ export const UserChannelsView = ({
 	const loadMySites = useCallback(async () => {
 		try {
 			const result = await apiFetch<{ sites: MaintainerSite[] }>("/api/u/ldoh/my-sites");
-			setMySites(result.sites);
-			// Load channels & violations for each site
+			// Load channels & violations for each site before updating state
 			const chMap: Record<string, MaintainerChannel[]> = {};
 			const vMap: Record<string, LdohViolation[]> = {};
 			for (const site of result.sites) {
@@ -160,8 +159,10 @@ export const UserChannelsView = ({
 					vMap[site.id] = vResult.violations;
 				} catch { vMap[site.id] = []; }
 			}
+			// Batch all state updates together to avoid intermediate re-renders
 			setSiteChannels(chMap);
 			setSiteViolations(vMap);
+			setMySites(result.sites);
 		} catch { /* ignore */ }
 	}, [apiFetch]);
 
@@ -418,7 +419,7 @@ export const UserChannelsView = ({
 	}, []);
 
 	return (
-		<div class="space-y-5">
+		<div key={`ucv-${mySites.length}`} class="space-y-5">
 		{/* Maintainer panel */}
 		<div key="maintainer-panel" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
 			<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
