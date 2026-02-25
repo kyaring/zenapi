@@ -621,14 +621,31 @@ proxy.all("/*", tokenAuth, async (c) => {
 				}
 			}
 			// Credit contributor balance
+			// Only credit withdrawable_balance for the portion that came from the consumer's withdrawable balance,
+			// so gifted/free balance (default_balance, checkin rewards) cannot be laundered into withdrawable funds.
 			if (cost > 0 && channelForUsage.contributed_by && channelForUsage.charge_enabled === 1) {
 				const feeEnabled = await getChannelFeeEnabled(c.env.DB);
 				if (feeEnabled) {
 					const now = new Date().toISOString();
+					// Read the consumer's current balance AFTER deduction to determine how much came from withdrawable
+					let withdrawableCredit = 0;
+					if (tokenRecord.user_id) {
+						const consumer = await c.env.DB.prepare(
+							"SELECT balance, withdrawable_balance FROM users WHERE id = ?",
+						).bind(tokenRecord.user_id).first<{ balance: number; withdrawable_balance: number }>();
+						if (consumer) {
+							// After deduction: balance is already reduced by cost
+							// Before deduction: old_balance = consumer.balance + cost
+							// Gifted portion = old_balance - withdrawable_balance = (consumer.balance + cost) - consumer.withdrawable_balance
+							const giftedPortion = Math.max(0, (consumer.balance + cost) - consumer.withdrawable_balance);
+							// Amount consumed from withdrawable = cost - giftedPortion (clamped to [0, cost])
+							withdrawableCredit = Math.max(0, cost - giftedPortion);
+						}
+					}
 					await c.env.DB.prepare(
 						"UPDATE users SET balance = balance + ?, withdrawable_balance = withdrawable_balance + ?, updated_at = ? WHERE id = ?",
 					)
-						.bind(cost, cost, now, channelForUsage.contributed_by)
+						.bind(cost, withdrawableCredit, now, channelForUsage.contributed_by)
 						.run();
 				}
 			}
