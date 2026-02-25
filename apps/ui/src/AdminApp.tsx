@@ -554,6 +554,15 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 		setNotice("渠道已拒绝");
 	}, [apiFetch, loadLdoh]);
 
+	const handleLdohAddSite = useCallback(async (apiBaseUrl: string, maintainerUsername: string, name: string) => {
+		await apiFetch("/api/ldoh/sites", {
+			method: "POST",
+			body: JSON.stringify({ apiBaseUrl, maintainerUsername: maintainerUsername || undefined, name: name || undefined }),
+		});
+		await loadLdoh();
+		setNotice("站点已添加");
+	}, [apiFetch, loadLdoh]);
+
 	const handleSettingsSubmit = useCallback(
 		async (event: Event) => {
 			event.preventDefault();
@@ -1009,6 +1018,7 @@ export const AdminApp = ({ token, updateToken, onNavigate }: AdminAppProps) => {
 					pendingMaintainers={ldohPendingMaintainers}
 					pendingChannels={ldohPendingChannels}
 					onSync={handleLdohSync}
+					onAddSite={handleLdohAddSite}
 					onApproveMaintainer={handleLdohApproveMaintainer}
 					onRejectMaintainer={handleLdohRejectMaintainer}
 					onApproveChannel={handleLdohApproveChannel}

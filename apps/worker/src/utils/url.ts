@@ -31,6 +31,15 @@ export function extractHostname(url: string): string {
 }
 
 /**
+ * Checks if a channel hostname matches a site hostname (exact or subdomain).
+ * e.g. "api.example.com" matches "example.com", "example.com" matches "example.com"
+ */
+export function hostnameMatches(channelHostname: string, siteHostname: string): boolean {
+	if (!channelHostname || !siteHostname) return false;
+	return channelHostname === siteHostname || channelHostname.endsWith(`.${siteHostname}`);
+}
+
+/**
  * Rewrites bare-IP URLs to use sslip.io so Cloudflare Workers can fetch them.
  * e.g. http://1.2.3.4:8080/v1 → http://1.2.3.4.sslip.io:8080/v1
  */

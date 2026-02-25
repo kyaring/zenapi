@@ -7,18 +7,21 @@ import { extractHostname } from "../utils/url";
 
 const ldoh = new Hono<AppEnv>();
 
+type LdohApiMaintainer = {
+	name?: string;
+	id?: string;
+	username?: string;
+	profileUrl?: string;
+};
+
 type LdohApiSite = {
 	id: string;
 	name: string;
 	description?: string;
-	api_base_url: string;
+	apiBaseUrl: string;
 	tags?: string[];
-	is_visible?: boolean;
-	maintainer?: {
-		name?: string;
-		username?: string;
-		linuxdo_id?: string;
-	};
+	isOnlyMaintainerVisible?: boolean;
+	maintainers?: LdohApiMaintainer[];
 };
 
 /**
@@ -38,8 +41,8 @@ ldoh.post("/sync", async (c) => {
 		if (!resp.ok) {
 			return jsonError(c, 502, "ldoh_fetch_failed", `LDOH API 返回 ${resp.status}`);
 		}
-		const data = await resp.json() as { data?: LdohApiSite[] } | LdohApiSite[];
-		sites = Array.isArray(data) ? data : (data as { data?: LdohApiSite[] }).data ?? [];
+		const data = await resp.json() as { sites?: LdohApiSite[] };
+		sites = data.sites ?? [];
 	} catch (error) {
 		return jsonError(c, 502, "ldoh_fetch_error", `无法连接 LDOH: ${(error as Error).message}`);
 	}
@@ -49,11 +52,12 @@ ldoh.post("/sync", async (c) => {
 	let syncedMaintainers = 0;
 
 	for (const site of sites) {
-		if (!site.api_base_url) continue;
-		const hostname = extractHostname(site.api_base_url);
+		if (!site.apiBaseUrl) continue;
+		const hostname = extractHostname(site.apiBaseUrl);
 		if (!hostname) continue;
 
 		const siteId = site.id || crypto.randomUUID();
+		const isVisible = site.isOnlyMaintainerVisible ? 0 : 1;
 
 		await c.env.DB.prepare(
 			`INSERT INTO ldoh_sites (id, name, description, api_base_url, api_base_hostname, tags_json, is_visible, source, synced_at)
@@ -71,32 +75,33 @@ ldoh.post("/sync", async (c) => {
 				siteId,
 				site.name || "Unknown",
 				site.description || null,
-				site.api_base_url,
+				site.apiBaseUrl,
 				hostname,
 				site.tags ? JSON.stringify(site.tags) : null,
-				site.is_visible === false ? 0 : 1,
+				isVisible,
 				now,
 			)
 			.run();
 		syncedSites++;
 
-		if (site.maintainer?.username) {
+		// Process all maintainers (it's an array)
+		for (const m of site.maintainers ?? []) {
+			if (!m.username) continue;
 			const maintainerId = crypto.randomUUID();
 			await c.env.DB.prepare(
 				`INSERT INTO ldoh_site_maintainers (id, site_id, name, username, linuxdo_id, approved, source)
 				 VALUES (?, ?, ?, ?, ?, 1, 'ldoh')
 				 ON CONFLICT(site_id, username) DO UPDATE SET
 				   name = excluded.name,
-				   linuxdo_id = excluded.linuxdo_id,
 				   approved = 1,
 				   source = 'ldoh'`,
 			)
 				.bind(
 					maintainerId,
 					siteId,
-					site.maintainer.name || site.maintainer.username,
-					site.maintainer.username,
-					site.maintainer.linuxdo_id || null,
+					m.name || m.username,
+					m.username,
+					m.id || null,
 				)
 				.run();
 
@@ -104,14 +109,14 @@ ldoh.post("/sync", async (c) => {
 			const localUser = await c.env.DB.prepare(
 				"SELECT id FROM users WHERE linuxdo_username = ?",
 			)
-				.bind(site.maintainer.username)
+				.bind(m.username)
 				.first<{ id: string }>();
 
 			if (localUser) {
 				await c.env.DB.prepare(
 					"UPDATE ldoh_site_maintainers SET user_id = ? WHERE site_id = ? AND username = ?",
 				)
-					.bind(localUser.id, siteId, site.maintainer.username)
+					.bind(localUser.id, siteId, m.username)
 					.run();
 			}
 			syncedMaintainers++;
@@ -119,6 +124,77 @@ ldoh.post("/sync", async (c) => {
 	}
 
 	return c.json({ ok: true, synced_sites: syncedSites, synced_maintainers: syncedMaintainers });
+});
+
+/**
+ * Manually adds a site with optional maintainer.
+ */
+ldoh.post("/sites", async (c) => {
+	const body = await c.req.json().catch(() => null);
+	if (!body?.apiBaseUrl) {
+		return jsonError(c, 400, "missing_url", "请提供 API Base URL");
+	}
+
+	const apiBaseUrl = String(body.apiBaseUrl).trim();
+	const hostname = extractHostname(apiBaseUrl);
+	if (!hostname) {
+		return jsonError(c, 400, "invalid_url", "无效的 URL");
+	}
+
+	const maintainerUsername = body.maintainerUsername ? String(body.maintainerUsername).trim() : null;
+	const siteName = body.name ? String(body.name).trim() : hostname;
+	const now = nowIso();
+
+	// Check if site already exists with this hostname
+	const existing = await c.env.DB.prepare(
+		"SELECT id FROM ldoh_sites WHERE api_base_hostname = ?",
+	)
+		.bind(hostname)
+		.first<{ id: string }>();
+
+	let siteId: string;
+
+	if (existing) {
+		siteId = existing.id;
+	} else {
+		siteId = crypto.randomUUID();
+		await c.env.DB.prepare(
+			`INSERT INTO ldoh_sites (id, name, api_base_url, api_base_hostname, source, synced_at)
+			 VALUES (?, ?, ?, ?, 'manual', ?)`,
+		)
+			.bind(siteId, siteName, apiBaseUrl, hostname, now)
+			.run();
+	}
+
+	if (maintainerUsername) {
+		const maintainerId = crypto.randomUUID();
+		await c.env.DB.prepare(
+			`INSERT INTO ldoh_site_maintainers (id, site_id, name, username, approved, source)
+			 VALUES (?, ?, ?, ?, 1, 'manual')
+			 ON CONFLICT(site_id, username) DO UPDATE SET
+			   approved = 1,
+			   source = 'manual'`,
+		)
+			.bind(maintainerId, siteId, maintainerUsername, maintainerUsername)
+			.run();
+
+		// Try to match user_id by linuxdo_username
+		const localUser = await c.env.DB.prepare(
+			"SELECT id FROM users WHERE linuxdo_username = ?",
+		)
+			.bind(maintainerUsername)
+			.first<{ id: string }>();
+
+		if (localUser) {
+			await c.env.DB.prepare(
+				"UPDATE ldoh_site_maintainers SET user_id = ? WHERE site_id = ? AND username = ?",
+			)
+				.bind(localUser.id, siteId, maintainerUsername)
+				.run();
+		}
+	}
+
+	return c.json({ ok: true, site_id: siteId });
 });
 
 /**

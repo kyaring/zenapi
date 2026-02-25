@@ -6,7 +6,7 @@ import { saveChannelAliases } from "../services/model-aliases";
 import { getSiteMode } from "../services/settings";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
-import { extractHostname } from "../utils/url";
+import { extractHostname, hostnameMatches } from "../utils/url";
 
 type AliasConfig = {
 	aliases: string[];
@@ -93,12 +93,14 @@ userChannels.post("/", async (c) => {
 	let channelStatus = "active";
 
 	if (hostname) {
-		// Check if hostname is blocked
-		const blocked = await c.env.DB.prepare(
-			"SELECT b.id, b.site_id, s.name as site_name FROM ldoh_blocked_urls b JOIN ldoh_sites s ON s.id = b.site_id WHERE b.hostname = ?",
-		)
-			.bind(hostname)
-			.first<{ id: string; site_id: string; site_name: string }>();
+		// Check if hostname is blocked (domain suffix match)
+		const blockedResult = await c.env.DB.prepare(
+			"SELECT b.id, b.site_id, b.hostname, s.name as site_name FROM ldoh_blocked_urls b JOIN ldoh_sites s ON s.id = b.site_id",
+		).all();
+
+		const blocked = (blockedResult.results ?? []).find((row) =>
+			hostnameMatches(hostname, String(row.hostname)),
+		) as { id: string; site_id: string; hostname: string; site_name: string } | undefined;
 
 		if (blocked) {
 			// Record violation
@@ -122,12 +124,14 @@ userChannels.post("/", async (c) => {
 			return jsonError(c, 403, "hostname_blocked", "该 API 地址已被站点维护者封禁");
 		}
 
-		// Check if hostname matches an LDOH site → require pending approval
-		const matchedSite = await c.env.DB.prepare(
-			"SELECT id FROM ldoh_sites WHERE api_base_hostname = ?",
-		)
-			.bind(hostname)
-			.first();
+		// Check if hostname matches an LDOH site → require pending approval (domain suffix match)
+		const sitesResult = await c.env.DB.prepare(
+			"SELECT id, api_base_hostname FROM ldoh_sites",
+		).all();
+
+		const matchedSite = (sitesResult.results ?? []).find((row) =>
+			hostnameMatches(hostname, String(row.api_base_hostname)),
+		);
 
 		if (matchedSite) {
 			channelStatus = "pending";

@@ -7,6 +7,7 @@ type LdohViewProps = {
 	pendingMaintainers: LdohSiteMaintainer[];
 	pendingChannels: Array<{ id: string; name: string; base_url: string; status: string; user_name?: string; site_name?: string }>;
 	onSync: () => Promise<void>;
+	onAddSite: (apiBaseUrl: string, maintainerUsername: string, name: string) => Promise<void>;
 	onApproveMaintainer: (id: string) => Promise<void>;
 	onRejectMaintainer: (id: string) => Promise<void>;
 	onApproveChannel: (id: string) => Promise<void>;
@@ -19,6 +20,7 @@ export const LdohView = ({
 	pendingMaintainers,
 	pendingChannels,
 	onSync,
+	onAddSite,
 	onApproveMaintainer,
 	onRejectMaintainer,
 	onApproveChannel,
@@ -26,6 +28,10 @@ export const LdohView = ({
 }: LdohViewProps) => {
 	const [syncing, setSyncing] = useState(false);
 	const [syncNotice, setSyncNotice] = useState("");
+	const [addUrl, setAddUrl] = useState("");
+	const [addUsername, setAddUsername] = useState("");
+	const [addName, setAddName] = useState("");
+	const [addNotice, setAddNotice] = useState("");
 
 	const handleSync = useCallback(async () => {
 		setSyncing(true);
@@ -39,6 +45,23 @@ export const LdohView = ({
 			setSyncing(false);
 		}
 	}, [onSync]);
+
+	const handleAddSite = useCallback(async () => {
+		if (!addUrl.trim()) {
+			setAddNotice("请输入 API Base URL");
+			return;
+		}
+		setAddNotice("");
+		try {
+			await onAddSite(addUrl.trim(), addUsername.trim(), addName.trim());
+			setAddNotice("站点已添加");
+			setAddUrl("");
+			setAddUsername("");
+			setAddName("");
+		} catch (error) {
+			setAddNotice((error as Error).message);
+		}
+	}, [onAddSite, addUrl, addUsername, addName]);
 
 	return (
 		<div class="space-y-5">
@@ -60,6 +83,48 @@ export const LdohView = ({
 				{syncNotice && (
 					<div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
 						{syncNotice}
+					</div>
+				)}
+			</div>
+
+			{/* Manual add site */}
+			<div class="rounded-2xl border border-stone-200 bg-white p-5 shadow-lg">
+				<h3 class="mb-4 font-['Space_Grotesk'] text-lg tracking-tight text-stone-900">
+					手动添加站点
+				</h3>
+				<div class="flex flex-wrap gap-3">
+					<input
+						type="text"
+						placeholder="API Base URL *"
+						value={addUrl}
+						onInput={(e) => setAddUrl((e.target as HTMLInputElement).value)}
+						class="flex-1 min-w-[200px] rounded-lg border border-stone-200 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+					/>
+					<input
+						type="text"
+						placeholder="维护者 LinuxDO 用户名"
+						value={addUsername}
+						onInput={(e) => setAddUsername((e.target as HTMLInputElement).value)}
+						class="w-48 rounded-lg border border-stone-200 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+					/>
+					<input
+						type="text"
+						placeholder="站点名称（可选）"
+						value={addName}
+						onInput={(e) => setAddName((e.target as HTMLInputElement).value)}
+						class="w-40 rounded-lg border border-stone-200 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+					/>
+					<button
+						type="button"
+						class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-all hover:shadow-lg"
+						onClick={handleAddSite}
+					>
+						添加站点
+					</button>
+				</div>
+				{addNotice && (
+					<div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+						{addNotice}
 					</div>
 				)}
 			</div>

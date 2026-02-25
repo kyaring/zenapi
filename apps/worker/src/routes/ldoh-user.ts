@@ -4,7 +4,7 @@ import type { UserRecord } from "../middleware/userAuth";
 import { userAuth } from "../middleware/userAuth";
 import { jsonError } from "../utils/http";
 import { nowIso } from "../utils/time";
-import { extractHostname } from "../utils/url";
+import { extractHostname, hostnameMatches } from "../utils/url";
 
 const ldohUser = new Hono<AppEnv>();
 
@@ -160,10 +160,10 @@ ldohUser.get("/sites/:id/channels", async (c) => {
 		 ORDER BY c.created_at DESC`,
 	).all();
 
-	// Filter channels whose base_url hostname matches the site hostname
+	// Filter channels whose base_url hostname matches the site hostname (domain suffix match)
 	const matching = (channels.results ?? []).filter((ch) => {
 		const chHostname = extractHostname(String(ch.base_url));
-		return chHostname === site.api_base_hostname;
+		return hostnameMatches(chHostname, site.api_base_hostname);
 	});
 
 	return c.json({ channels: matching });
@@ -302,14 +302,18 @@ ldohUser.delete("/channels/:channelId", async (c) => {
 
 	const channelHostname = extractHostname(channel.base_url);
 
-	// Check that user is an approved maintainer of a site matching this hostname
-	const maintainerSite = await c.env.DB.prepare(
-		`SELECT s.id FROM ldoh_site_maintainers m
+	// Check that user is an approved maintainer of a site matching this hostname (domain suffix match)
+	const maintainerSites = await c.env.DB.prepare(
+		`SELECT s.id, s.api_base_hostname FROM ldoh_site_maintainers m
 		 JOIN ldoh_sites s ON s.id = m.site_id
-		 WHERE m.username = ? AND m.approved = 1 AND s.api_base_hostname = ?`,
+		 WHERE m.username = ? AND m.approved = 1`,
 	)
-		.bind(user.linuxdo_username, channelHostname)
-		.first();
+		.bind(user.linuxdo_username)
+		.all();
+
+	const maintainerSite = (maintainerSites.results ?? []).find((s) =>
+		hostnameMatches(channelHostname, String(s.api_base_hostname)),
+	);
 
 	if (!maintainerSite) {
 		return jsonError(c, 403, "not_site_maintainer", "你不是匹配此渠道地址的站点维护者");
@@ -343,17 +347,21 @@ ldohUser.post("/channels/:channelId/approve", async (c) => {
 		return jsonError(c, 404, "channel_not_found", "channel_not_found");
 	}
 
-	const channelHostname = extractHostname(channel.base_url);
+	const channelHostname2 = extractHostname(channel.base_url);
 
-	const maintainerSite = await c.env.DB.prepare(
-		`SELECT s.id FROM ldoh_site_maintainers m
+	const maintainerSites2 = await c.env.DB.prepare(
+		`SELECT s.id, s.api_base_hostname FROM ldoh_site_maintainers m
 		 JOIN ldoh_sites s ON s.id = m.site_id
-		 WHERE m.username = ? AND m.approved = 1 AND s.api_base_hostname = ?`,
+		 WHERE m.username = ? AND m.approved = 1`,
 	)
-		.bind(user.linuxdo_username, channelHostname)
-		.first();
+		.bind(user.linuxdo_username)
+		.all();
 
-	if (!maintainerSite) {
+	const maintainerSite2 = (maintainerSites2.results ?? []).find((s) =>
+		hostnameMatches(channelHostname2, String(s.api_base_hostname)),
+	);
+
+	if (!maintainerSite2) {
 		return jsonError(c, 403, "not_site_maintainer", "你不是匹配此渠道地址的站点维护者");
 	}
 
@@ -387,17 +395,21 @@ ldohUser.post("/channels/:channelId/reject", async (c) => {
 		return jsonError(c, 404, "channel_not_found", "channel_not_found");
 	}
 
-	const channelHostname = extractHostname(channel.base_url);
+	const channelHostname3 = extractHostname(channel.base_url);
 
-	const maintainerSite = await c.env.DB.prepare(
-		`SELECT s.id FROM ldoh_site_maintainers m
+	const maintainerSites3 = await c.env.DB.prepare(
+		`SELECT s.id, s.api_base_hostname FROM ldoh_site_maintainers m
 		 JOIN ldoh_sites s ON s.id = m.site_id
-		 WHERE m.username = ? AND m.approved = 1 AND s.api_base_hostname = ?`,
+		 WHERE m.username = ? AND m.approved = 1`,
 	)
-		.bind(user.linuxdo_username, channelHostname)
-		.first();
+		.bind(user.linuxdo_username)
+		.all();
 
-	if (!maintainerSite) {
+	const maintainerSite3 = (maintainerSites3.results ?? []).find((s) =>
+		hostnameMatches(channelHostname3, String(s.api_base_hostname)),
+	);
+
+	if (!maintainerSite3) {
 		return jsonError(c, 403, "not_site_maintainer", "你不是匹配此渠道地址的站点维护者");
 	}
 
